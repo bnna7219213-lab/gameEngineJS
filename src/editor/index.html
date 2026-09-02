@@ -1,0 +1,76 @@
+<!doctype html>
+<html lang="zh-CN" data-theme="dark">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>engine_tensorflow+js · Web IDE</title>
+  <link rel="stylesheet" href="./styles.css" />
+</head>
+<body>
+  <div id="app">
+    <header id="toolbar">
+      <span class="brand">engine<b>+tf.js</b> IDE</span>
+      <button data-cmd="save" title="保存工程 (Ctrl+S)">保存</button>
+      <button data-cmd="undo" title="撤销 (Ctrl+Z)">↶</button>
+      <button data-cmd="redo" title="重做 (Ctrl+Y)">↷</button>
+      <span class="sep"></span>
+      <button data-cmd="spawn-cube">+立方体</button>
+      <button data-cmd="spawn-sphere">+球</button>
+      <button data-cmd="spawn-light">+光</button>
+      <span class="sep"></span>
+      <button data-cmd="play" title="播放/暂停 (空格)">▶</button>
+      <button data-cmd="stop" title="停止">■</button>
+      <button data-cmd="play-game" title="Play 模式：编辑器内嵌 GameRuntime（快照隔离）">▶Run</button>
+      <button data-cmd="code" title="代码工作台 (P5#3)">⟨⟩</button>
+      <span class="sep"></span>
+      <button data-cmd="import" title="导入向导">导入…</button>
+      <button data-cmd="preview" title="新预览窗口">预览</button>
+      <button data-cmd="palette" title="命令面板 (Ctrl+K)">命令</button>
+      <button data-cmd="theme" title="切换主题">◐</button>
+      <span class="spacer"></span>
+      <span id="status"></span>
+    </header>
+
+    <nav id="scene-tabs"></nav>
+
+    <main id="middle">
+      <aside id="left">
+        <div class="panel-head">层级 <button id="btn-add-obj" title="新建空对象">＋</button></div>
+        <div id="hierarchy" class="panel-body"></div>
+        <div class="panel-head">资源 <button id="btn-add-asset" title="登记资产">＋</button></div>
+        <div id="asset-browser" class="panel-body"></div>
+      </aside>
+
+      <section id="center">
+        <canvas id="viewport" width="960" height="600" tabindex="0"></canvas>
+        <div id="perf-hud"></div>
+        <div id="profiler-panel" hidden></div>
+        <div id="timeline-bar">
+          <button id="tl-play">▶</button>
+          <input id="tl-scrub" type="range" min="0" max="5" step="0.016" value="0" />
+          <span id="tl-time">0.00 / 5.00s</span>
+          <button id="tl-add-track" title="为选中对象 position 加轨道">+轨道</button>
+          <button id="tl-key" title="在当前时间打关键帧">◆关键帧</button>
+        </div>
+        <div id="code-editor" hidden></div>
+      </section>
+
+      <aside id="right">
+        <div class="panel-head">检视器</div>
+        <div id="inspector" class="panel-body"></div>
+      </aside>
+    </main>
+
+    <footer id="bottom">
+      <div class="panel-head">gbhy 控制台 <span class="hint">help() 查看 API</span></div>
+      <div id="console-log"></div>
+      <div id="console-input-row">
+        <span class="prompt">›</span><input id="console-input" spellcheck="false" placeholder="spawn('cube', {position:[0,0,0]})" />
+      </div>
+    </footer>
+  </div>
+
+  <div id="modal-root"></div>
+  <script type="module" src="./main.js"></script>
+</body>
+</html>
