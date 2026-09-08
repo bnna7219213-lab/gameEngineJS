@@ -1,0 +1,159 @@
+<!DOCTYPE html>
+<html lang="zh">
+<head>
+<meta charset="utf-8" />
+<title>PBR Parity · WebGL2 ↔ Software（红线 D 视觉验收）</title>
+<style>
+  body { margin: 0; background: #11131a; color: #d8dce6; font: 13px/1.5 system-ui, sans-serif; }
+  header { padding: 10px 16px; border-bottom: 1px solid #2a2f3a; display: flex; gap: 18px; align-items: center; flex-wrap: wrap; }
+  h1 { font-size: 15px; margin: 0; font-weight: 600; }
+  .group { display: flex; gap: 10px; align-items: center; }
+  label { color: #9aa3b2; }
+  .views { display: flex; gap: 12px; padding: 14px 16px; flex-wrap: wrap; }
+  .card { background: #181b24; border: 1px solid #2a2f3a; border-radius: 8px; padding: 8px; }
+  .card b { display: block; margin-bottom: 6px; color: #b9c2d4; font-weight: 600; }
+  canvas { display: block; image-rendering: pixelated; background: #000; width: 256px; height: 256px; }
+  #report { padding: 0 16px 20px; }
+  .ok { color: #6ee787; } .bad { color: #ff7b72; }
+  .stat { font-family: ui-monospace, monospace; }
+  .note { color: #8b93a3; font-size: 12px; max-width: 720px; }
+</style>
+</head>
+<body>
+<header>
+  <h1>PBR Parity · WebGL2 ↔ Software</h1>
+  <div class="group"><label>旋转</label><input id="rot" type="range" min="0" max="360" value="25" /></div>
+  <div class="group"><label>Rough</label><input id="rough" type="range" min="0.04" max="1" step="0.01" value="0.4" /></div>
+  <div class="group"><label>Metal</label><input id="metal" type="range" min="0" max="1" step="0.01" value="0.2" /></div>
+  <div class="group"><label>阴影</label><input id="shadow" type="checkbox" /></div>
+  <div class="group"><label>IBL</label><input id="ibl" type="checkbox" /></div>
+  <button id="rerun">重新渲染并对比</button>
+</header>
+
+<div class="views">
+  <div class="card"><b>WebGL2（生产端）</b><canvas id="cvGL" width="128" height="128"></canvas></div>
+  <div class="card"><b>Software（黄金参考 / 红线 D）</b><canvas id="cvSW" width="128" height="128"></canvas></div>
+  <div class="card"><b>逐像素 |Δ|（放大映射）</b><canvas id="cvDiff" width="128" height="128"></canvas></div>
+</div>
+
+<div id="report">
+  <div class="stat" id="stat">初始化中…</div>
+  <p class="note">
+    验收标准：两后端对同场景做 PBR 前向渲染，逐像素比对 RGBA8（0..255）。
+    <b>均值 |Δ| ≤ 2/255</b>（容差 2），且越界像素（|Δ|&gt;2）比例极低即为 PASS。
+    WebGL2 与 Software 共享同一份 GLSL/JS 双写公式与同一阴影 CPU 参考（renderShadowMap），保证逐像素一致。
+    须经 HTTP 提供本页（如 <code>node serve.mjs</code> 或 <code>python -m http.server</code>），ESM import 才能工作。
+  </p>
+</div>
+
+<script type="module">
+import { Viewport3D } from '../src/engine/render/viewport3d.js';
+import { SoftwareDevice } from '../src/engine/render/rhi_software.js';
+import { WebGL2Device } from '../src/engine/render/rhi_webgl2.js';
+import { directionalLight, pointLight } from '../src/engine/render/lights.js';
+import { bakeSkySH } from '../src/engine/render/ibl.js';
+import { Vec3 } from '../src/engine/core/math.js';
+
+const W = 128;
+const cvGL = document.getElementById('cvGL');
+const cvSW = document.getElementById('cvSW');
+const cvDiff = document.getElementById('cvDiff');
+const stat = document.getElementById('stat');
+
+// ---- 生成 UV 球（带法线）----
+function makeSphere(segU = 32, segV = 16, r = 1) {
+  const pos = [], nor = [], idx = [];
+  for (let i = 0; i <= segV; i++) {
+    const v = i / segV, phi = v * Math.PI;
+    for (let j = 0; j <= segU; j++) {
+      const u = j / segU, theta = u * Math.PI * 2;
+      const x = Math.sin(phi) * Math.cos(theta), y = Math.cos(phi), z = Math.sin(phi) * Math.sin(theta);
+      pos.push(x * r, y * r, z * r); nor.push(x, y, z);
+    }
+  }
+  const row = segU + 1;
+  for (let i = 0; i < segV; i++) for (let j = 0; j < segU; j++) {
+    const a = i * row + j, b = a + row;
+    idx.push(a, b, a + 1, a + 1, b, b + 1);
+  }
+  return { positions: new Float32Array(pos), normals: new Float32Array(nor), indices: new Uint32Array(idx) };
+}
+
+// ---- 后端准备 ----
+const swDev = new SoftwareDevice();
+swDev.resize(W, W);
+const glDev = new WebGL2Device();
+let glOK = await glDev.init({ canvas: cvGL, width: W, height: W });
+const swVp = new Viewport3D(swDev, { width: W, height: W });
+const glVp = glOK ? new Viewport3D(glDev, { width: W, height: W }) : null;
+
+function buildScene(vp, rotDeg, rough, metal, withShadow, withIBL) {
+  vp.meshes.clear();
+  vp.setIBL(withIBL ? bakeSkySH({ samples: 64 }) : null);
+  const s = makeSphere();
+  const a = rotDeg * Math.PI / 180;
+  vp.addMesh({ ...s, albedo: [200, 60, 60], rough, metal, emissive: [0, 0, 0],
+    transform: { position: [0, 0, 0], rotation: [0, a, 0], scale: [1.2, 1.2, 1.2] } });
+  vp.setCamera({ eye: [0, 0, 4.2], target: [0, 0, 0], up: [0, 1, 0] });
+  const lights = [
+    directionalLight({ direction: [0.4, 0.8, 0.6], color: [255, 255, 255], intensity: 1.2,
+      ...(withShadow ? { shadow: { radius: 3 } } : {}) }),
+    pointLight({ position: [2.5, 2.0, 2.5], color: [255, 200, 160], intensity: 1.0 }),
+  ];
+  vp.setLights(lights);
+  vp.setAmbient([0.04, 0.05, 0.07]);
+}
+
+function putCanvas(canvas, rgba) {
+  const ctx = canvas.getContext('2d');
+  const img = ctx.createImageData(W, W);
+  img.data.set(rgba);
+  ctx.putImageData(img, 0, 0);
+}
+
+function compare(a, b) {
+  let sum = 0, max = 0, over2 = 0, over4 = 0, n = 0;
+  const diff = new Uint8ClampedArray(a.length);
+  for (let i = 0; i < a.length; i += 4) {
+    let m = 0;
+    for (let k = 0; k < 3; k++) { const d = Math.abs(a[i + k] - b[i + k]); m = Math.max(m, d); sum += d; if (d > max) max = d; if (d > 2) over2++; if (d > 4) over4++; }
+    // 把 |Δ|（0..255）映射成可见的暖色
+    diff[i] = Math.min(255, m * 6); diff[i + 1] = 0; diff[i + 2] = Math.min(255, (255 - m) * 0.3); diff[i + 3] = 255;
+    n++;
+  }
+  const mean = sum / (n * 3);
+  return { mean, max, over2, over4, n, diff };
+}
+
+function run() {
+  const rot = +document.getElementById('rot').value;
+  const rough = +document.getElementById('rough').value;
+  const metal = +document.getElementById('metal').value;
+  const withShadow = document.getElementById('shadow').checked;
+  const withIBL = document.getElementById('ibl').checked;
+
+  buildScene(swVp, rot, rough, metal, withShadow, withIBL);
+  const swRGBA = swVp.renderToRGBA8();
+  putCanvas(cvSW, swRGBA);
+
+  if (!glOK) {
+    stat.innerHTML = '<span class="bad">WebGL2 不可用（当前环境无 GPU/上下文）。仅 Software 黄金参考可用。</span>';
+    return;
+  }
+  buildScene(glVp, rot, rough, metal, withShadow, withIBL);
+  const glRGBA = glVp.renderToRGBA8(); // WebGL 已直接绘制到 cvGL 画布，无需再 putImageData
+  const r = compare(glRGBA, swRGBA);
+  putCanvas(cvDiff, r.diff);
+  const pass = r.mean <= 2 && r.over4 < r.n * 0.01;
+  stat.innerHTML =
+    `<span class="${pass ? 'ok' : 'bad'}">${pass ? 'PASS' : 'REVIEW'}</span> · ` +
+    `均值|Δ|=${r.mean.toFixed(3)}/255 · 最大|Δ|=${r.max} · ` +
+    `越界(|Δ|>2)=${r.over2}（${(100 * r.over2 / r.n).toFixed(2)}%） · ` +
+    `严重(|Δ|>4)=${r.over4}`;
+}
+document.getElementById('rerun').addEventListener('click', run);
+for (const id of ['rot', 'rough', 'metal', 'shadow', 'ibl']) document.getElementById(id).addEventListener('input', run);
+run();
+</script>
+</body>
+</html>

@@ -1,0 +1,574 @@
+=== SLIDE 1 ===
+RUNTIME / EDITOR / CORE
+WebGL2 / WebGPU 双后端
+零后端算力
+零运行时依赖
+纯 ES2022
+BROWSER GAME ENGINE
+取代 Three.js 的真正游戏引擎
+浏览器端独立运行完整 3D 游戏 · 对标 Unity6 浏览器端能力
+项目代号 Browser Game Engine    ·    2026-09    ·    v2 Roadmap    ·    宣传 + 操作手册
+=== SLIDE 2 ===
+Browser Game Engine · 宣传与操作手册
+02 / 19
+WHY / 市场空白
+为什么需要它
+Three.js 是渲染库，Unity 依赖后端，Godot Web 受限 —— 「打开浏览器就能做游戏」的位置仍然空着
+行业痛点
+!
+Three.js 是渲染库，不是游戏引擎
+无物理 / 无音频 / 无编辑器 / 无协作 / 无导出
+!
+Unity / Unreal 需要后端服务器
+无法纯浏览器部署，打包链路重
+!
+Godot Web 版本性能受限
+WASM + WebGL1，体积与启动慢
+!
+教育 / 原型 / 轻量游戏缺工具
+没有「打开浏览器就能做游戏」的选项
+四象限定位图
+← 浏览器
+原生 →
+完整引擎 ↑
+渲染库 ↓
+Three.js
+Godot Web
+Unity
+本引擎
+本引擎 = 浏览器 × 完整引擎 的唯一交点
+=== SLIDE 3 ===
+Browser Game Engine · 宣传与操作手册
+03 / 19
+STATUS / 当前状态
+当前状态一览
+v1 全量交付 + v2 Q1/Q5 已完成，50 个 smoke · 1596 断言全绿
+80%
+Q1
+物理 3D
+—
+Q2
+音频/网络
+—
+Q3
+TAA/Hi-Z
+—
+Q4
+WebGPU
+40%
+Q5
+Worker 池
+—
+Q6
+多人协作
+—
+Q7
+导出/游戏
+已交付（v1 + v2 部分）
+引擎源码
+109 个 JS 模块
+自动化测试
+50 个 smoke / 1596 断言 全绿
+游戏 Demo
+4 个（action3d / breakout / match3 / space_shooter）
+渲染后端
+WebGL2 RHI（完整）+ Software 黄金参考 + WebGPU（空壳）
+物理 / 编辑器 / 平台
+GJK+EPA 刚体 · GPU 视口 · Play 模式 · OPFS / GLTF / 骨骼动画 / DDC
+=== SLIDE 4 ===
+Browser Game Engine · 宣传与操作手册
+04 / 19
+ARCHITECTURE / 全景架构
+架构图（全景）
+编辑器 → 运行时单向依赖；CPU 黄金参考永不下线；确定性可重现
+Editor 编辑器
+层级树
+检视器
+代码工作台
+视口
+Profiler
+命令面板
+Runtime 运行时
+Render
+WebGL2 · PBR
+PostFX · Hi-Z
+Sim
+Physics GJK/EPA
+Char · Raycast
+Infer
+Neural · Net
+NanoTensor
+Platform
+GLTF · Image
+DDC · Cache
+EditorCode
+Scripts · Debug
+Worker
+GameRuntime · ScriptEngine · PlaySession
+Core 核心
+数学
+Rng
+JSON
+Profiler
+确定性
+单向依赖
+设计原则
+单后端自包含
+非微服务
+CPU 黄金参考
+parity 断言
+编辑器→运行时
+单向依赖
+确定性可重现
+固定 key 序
+=== SLIDE 5 ===
+Browser Game Engine · 宣传与操作手册
+05 / 19
+RENDERING / 渲染管线
+WebGL2 RHI 完整渲染管线
+VertexLayout / FBO / MRT / MSAA / Instancing · PBR GGX · PCF 阴影 · IBL · 后处理链
+Draw Call
+Geometry
+Lighting
+Shadow
+PostFX
+TAA
+Output
+GPU 路径 · WebGL2 / WebGPU
+PBR GGX（Albedo/Rough/Metal/Normal/Emission）
+PCF 阴影 / 灯光表 / IBL / 雾 / 后处理链
+VertexLayout / Uniform 声明表 / RGB·Float·SRGB 纹理
+CPU 路径 · Software 黄金参考
+纯 JS 光栅器，任何环境可运行
+Parity 断言：WebGL2 vs Software 逐像素对比
+容差 ≤ 2/255，数值正确性可验证
+PARITY ≤ 2/255 · 逐像素对齐
+待完成（Q3/Q4）
+TAA：Halton jitter + 运动矢量
+Hi-Z GPU 归约 + 遮挡剔除
+WebGPU 后端：WGSL 双轨 + compute
+=== SLIDE 6 ===
+Browser Game Engine · 宣传与操作手册
+06 / 19
+PHYSICS 3D / Q1 已完成
+物理 3D：GJK + EPA + Sequential Impulse
+真实物理管线在浏览器端 100% 运行，无 WASM、无第三方库
+已实现
+GJK 稳健版（_resolve3/_resolve4 · 26 方向采样）
+EPA 穿透深度（多面体扩展 · 4 面退化处理）
+Sequential Impulse（摩擦锥 / 恢复系数 / Baumgarte）
+多点接触（box-plane 8 顶点采样）+ 休眠双阈值
+形状：Box / Sphere / Capsule / Plane / Convex
+Raycast 全形状 + CharacterController（扫掠/滑墙/台阶）
+测试结果（Node headless）
+21
+sim_physics3d
+球-球 / 盒-盒 / 堆叠稳定 / 休眠
+14
+sim_raycast
+全形状 + 旋转盒 + Capsule
+3
+sim_raycast_convex
+AABB 预检 + 二分命中
+9
+sim_character
+重力 / 台阶 / 坡度 / 碰撞
+Broad Phase
+GJK 相交
+EPA 穿透
+Seq. Impulse
+Sleep 休眠
+Character
+物理管线
+=== SLIDE 7 ===
+Browser Game Engine · 宣传与操作手册
+07 / 19
+EDITOR / 编辑器与工具链
+编辑器：打开浏览器即是完整 IDE
+GPU 视口 · 检视器 · 代码工作台 · Play 模式 · Profiler · OPFS 持久化
+src/editor/index.html
+cube
+sun
+enemy
+coin
+ground
+camera
+层级树
+GPU 视口 + Gizmo
+检视器
+position
+rotation
+scale
+material
+particle
+⏸
+⏭
+▶
+时间轴 / 动画 / 粒子生命周期
+编辑器功能
+GPU 视口（实时渲染 + Gizmo + 网格/坐标轴）
+层级树 + 检视器（transform/material/particle）
+撤销重做 / 命令面板 / 多场景管理
+Play 模式：暂停 / 单步 / 热重载 / 断点
+代码工作台：Worker 语法校验 / tokenizer 高亮
+Profiler：帧时间线 / draw call / 内存面板
+平台层
+OPFS + File System Access 持久化
+GLTF 2.0（.glb 往返）/ 骨骼动画 + mixer
+图片解码 / DDC 编译缓存 / Worker 池
+=== SLIDE 8 ===
+Browser Game Engine · 宣传与操作手册
+08 / 19
+WORKER / Q5 协议层已完成
+Worker 池：主线程永不阻塞
+通用任务协议 { id, type, payload } → { id, result | error, progress }
+主线程
+游戏 / 编辑器
+WorkerPool.submit()
+任务队列 · 调度
+Worker #0
+Worker #1
+Worker #2
+postMessage 回传：result | error | progress
+Transferable 零拷贝
+5 种内置任务
+import-gltf
+GLB 解析 / JSON 场景树
+decode-image
+PNG/JPEG 识别 / 尺寸提取
+ddc-bake
+FNV1a 哈希 / 参数烘焙
+mesh-compress
+顶点/索引压缩 / 哈希
+custom
+用户自定义函数
+浏览器路径  Web Worker + Transferable 零拷贝
+Node 路径    顺序降级（微任务队列 / 异步语义不变）
+=== SLIDE 9 ===
+Browser Game Engine · 宣传与操作手册
+09 / 19
+QUALITY / 测试体系
+50 个 smoke · 1596 断言 · 全部 Node headless
+无外部依赖，全量执行 ~500ms；每个模块必须配套 smoke
+覆盖域
+类别
+Smoke
+断言
+代表性测试
+Core（数学/Rng/JSON/Profiler）
+2
+43
+core_smoke(31) / profiler_timeline(12)
+Render（RHI/PBR/Shadow/PostFX）
+14
+941
+render_primitives(908) / render_ibl(33)
+Sim（物理/角色/粒子）
+5
+47
+sim_physics3d(21) / sim_raycast(14)
+Platform（GLTF/Image/Worker/Cache）
+6
+57
+plat_worker(35) / plat_skin(22)
+Editor（视口/代码/Profiler/Debug）
+7
+53
+editor_smoke(32) / editor_code(21)
+Game/Play（脚本/会话/推理）
+4
+25
+play_session(10) / infer(15)
+断言密度（覆盖热力）
+Core
+43
+Render
+941
+Sim
+47
+Platform
+57
+Editor
+53
+Game/Play
+25
+配套测试  新增功能必须配套 smoke 测试
+Parity 断言  WebGL2 vs Software 逐像素 ≤ 2/255
+确定性断言  跨运行可重现（Rng 种子 / byte-identical）
+=== SLIDE 10 ===
+Browser Game Engine · 宣传与操作手册
+10 / 19
+BENCHMARK / 性能基准
+性能基准：当前指标 → v2 目标
+全部指标来自 smoke 实测（Node 22 headless），无估算
+~500ms
+Smoke 全量执行
+50 文件 / 1596 断言
+908 / 1ms
+render_primitives
+908 断言，CPU 光栅器 1ms
+21 / 800ms
+sim_physics3d
+21 断言，含堆叠休眠收敛
+35 / 36ms
+plat_worker
+5 种任务 + 并发 + 错误路径
+v2 完成时目标
+≥ 30 fps
+WebGL2 · 1080p · 中端 GPU
+通过
+Software 160p parity
+< 16 ms
+50MB GLB 导入 · 主线程帧时间
+≥ 60 fps
+编辑器视口
+优化路径：Software parity 基准 → profiler 实测定位 → 分阶段优化（每一步都有回归护栏）
+=== SLIDE 11 ===
+Browser Game Engine · 宣传与操作手册
+11 / 19
+HIGHLIGHTS / 技术亮点
+六个真正的技术差异点
+不是「又一个 Three.js 封装」，而是从光栅器到物理求解器的完整自研
+1
+CPU 黄金参考永不下线
+Software 光栅器作为 parity 基准，GPU 实现逐像素对齐 ≤2/255，数值正确性可验证
+2
+确定性可重现
+Rng 种子 / 序列化固定 key 序 / LF / 无时间戳 / 稳定 ID，跨运行跨平台可验证
+3
+单后端自包含
+非微服务：引擎+编辑器+运行时同进程，零 IPC 开销
+4
+零运行时依赖
+无 npm install / 无构建步骤 / 纯 ES2022 / 浏览器打开即用
+5
+Worker 降级策略
+浏览器 Web Worker 零拷贝；Node 顺序降级保持异步语义，同一套代码
+6
+物理稳健性
+GJK _resolve4 + EPA 26 方向采样 + containsOrigin 显式检查，退化不崩溃
+=== SLIDE 12 ===
+Browser Game Engine · 宣传与操作手册
+12 / 19
+ROADMAP / v2
+路线图 Q1–Q7：已完成 2 / 7 个季度目标
+规模合计 ~5150 行代码 + demo；每季度目标独立可验收
+Q1
+Q2
+Q3
+Q4
+Q5
+Q6
+Q7
+Q1  物理 3D 真实化
+✅ 80%
+~1400 行
+Q2  音频输出 + 网络传输
+待启动
+~600 行
+Q3  TAA / Hi-Z GPU 接线
+待启动
+~600 行
+Q4  WebGPU 真实化
+待启动
+~1000 行
+Q5  Worker 池化
+✅ 40%
+~350 行
+Q6  多人协作
+待启动
+~900 行
+Q7  静态导出 + 验收游戏
+待启动
+~300 行 + demo
+=== SLIDE 13 ===
+Browser Game Engine · 宣传与操作手册
+13 / 19
+NEXT / 下一步计划
+三步走：2 周 · 4 周 · 8 周
+近期补全 Worker 与物理接线 → 中期补齐体验层 → 远期完成平台闭环
+近期 · 1-2 周
+Q5 补全
+GLTF / 纹理 / DDC 迁入 Worker（~200 行）
+Q1 接线
+GameRuntime.stepPhysics 换真世界步进（~100 行）
+中期 · 2-4 周
+Q2
+音频桥 + 网络传输（~600 行）
+Q3
+TAA / Hi-Z GPU 接线（~600 行）
+远期 · 4-8 周
+Q4
+WebGPU compute（~1000 行）
+Q6
+多人协作（~900 行）
+Q7
+静态导出 + 验收游戏（~300 行 + demo）
+=== SLIDE 14 ===
+Browser Game Engine · 宣传与操作手册
+14 / 19
+SUMMARY
+打开浏览器 → 玩家即点即玩
+已实现
+109 模块 / 50 smoke / 1596 断言
+4 个游戏 Demo
+WebGL2 RHI 完整 + PBR
+物理 3D + 编辑器 + Play 模式
+CPU 黄金参考 parity / 确定性
+核心承诺
+浏览器端独立运行完整 3D 游戏
+全部计算 100% 驻留浏览器
+对标 Unity6 日常开发闭环
+零安装 · 零后端 · 零依赖
+适用场景
+独立游戏开发 · 免费 + 秒级部署
+教育教学 · 零安装环境
+原型验证 · 无需搭服务器
+嵌入式 / H5 · WebGL2/WebGPU
+打开浏览器
+写代码
+调试
+构建
+发布
+玩家即点即玩
+=== SLIDE 15 ===
+Browser Game Engine · 宣传与操作手册
+15 / 19
+OPERATOR'S GUIDE
+操作手册
+从零到玩家即点即玩：启动 · 编辑 · 调试 · 测试 · 部署
+01
+快速上手
+5 分钟跑起来
+02
+编辑器操作
+视口 / 检视器 / 快捷键
+03
+调试与测试
+Play 模式 / 热重载 / smoke
+04
+部署与导出
+静态托管 / 降级矩阵
+=== SLIDE 16 ===
+Browser Game Engine · 宣传与操作手册
+16 / 19
+MANUAL 01 / 快速上手
+5 分钟跑起来
+要求：Node ≥ 18 · 现代浏览器（Chrome / Edge / Firefox）· @tensorflow/tfjs 为可选依赖
+1
+启动本地服务器
+node serve.mjs
+默认 http://localhost:8080（ES module 需 http:// 而非 file://）
+2
+打开编辑器
+http://localhost:8080
+进入 src/editor/index.html —— 层级树 / 检视器 / 代码工作台
+3
+玩一个 Demo
+games/*.html
+action3d / breakout / match3 / space_shooter 直接打开即玩
+4
+全量 smoke 验收
+node tools/run_smoke.js
+Node headless，无需浏览器，~500ms 全绿
+5
+按前缀过滤
+node tools/run_smoke.js core_
+只跑 core_* 相关 smoke，快速定位
+环境要求
+Node.js ≥ 18（建议 22）
+任意现代浏览器
+无需 npm install
+无构建步骤 · 纯 ES2022
+推理降级
+已安装 tfjs
+TensorFlow.js 浏览器端推理
+ 
+未安装 tfjs
+自动降级内置 NanoTensor，smoke 必须仍然全绿（硬性要求）
+=== SLIDE 17 ===
+Browser Game Engine · 宣传与操作手册
+17 / 19
+MANUAL 02 / 编辑器操作
+视口 · 检视器 · 快捷键
+原生 DOM 实现，零框架零依赖；所有面板布局与桌面 IDE 一致
+基础操作
+视口：实时 GPU 渲染 + Gizmo 拖拽 + 网格/坐标轴
+层级树：选中 / 多选 / 拖拽排序 / 重命名
+检视器：transform / material / particle 属性编辑
+代码工作台：多 Tab / tokenizer 高亮 / OPFS 持久化
+命令面板：快速检索并执行所有编辑器命令
+时间轴：动画关键帧 + 粒子生命周期编辑
+Profiler：帧时间线 / draw call 统计 / 内存面板
+快捷键
+Ctrl + P
+进入 / 退出 Play 模式
+Ctrl + S
+热加载脚本进运行会话（不重启游戏）
+⏸ / ▶ / ⏭
+暂停 / 继续 / 单步（精确 1/60s 一帧）
+脚本调试 API（在脚本内以 this 调用）
+spawn / despawn
+timer / after
+raycast
+queryRadius
+distanceTo
+move / rotate
+onKeyDown...
+this.breakpoint()
+=== SLIDE 18 ===
+Browser Game Engine · 宣传与操作手册
+18 / 19
+MANUAL 03 / 调试与测试
+Debug 模式：边调试 · 边热加载 · 边运行
+游戏运行在场景深拷贝快照上，停止即回滚，编辑态零污染（红线 F）
+▶ Run (Ctrl+P)
+改脚本 / 检视器
+Ctrl+S 热加载
+⏭ 单步 / 断点
+实时面板观察
+调试工具
+逐帧单步：暂停后精确推进 1/60s 观察状态
+实时面板：每个实体的 pos(x,y,z) 与脚本 log
+监视表达式：sqrt(pos[0]^2+pos[2]^2) 即时求值
+断点：this.breakpoint([msg]) 命中自动暂停
+内联错误：语法错误行标红，显示「第 N 行: 错误」
+异常隔离：单脚本异常不影响其它脚本与编辑数据
+测试验收
+node tools/run_smoke.js —— 全量 50 smoke / 1596 断言
+支持前缀过滤：node tools/run_smoke.js sim_
+全部 Node headless，无需浏览器，~500ms
+脚本文件约定：scripts/<对象名>[#槽位].js
+cube / sun 已预置演示脚本（沿路径移动 / 自转）
+配套套件：debug_mode / api_extension / action3d_script
+=== SLIDE 19 ===
+MANUAL 04 / 部署与导出
+静态托管即部署，降级矩阵保兜底
+零构建产物：整个目录复制到任意静态服务器即可运行
+三种部署方式
+1
+本地开发
+node serve.mjs
+2
+Python 备选
+python -m http.server 8080
+3
+生产托管
+复制目录到任意静态服务器（零构建）
+诚实降级矩阵（能力缺失不崩溃）
+WebGPU
+WebGL2
+Software
+Worker
+顺序降级
+异步语义不变
+TF.js
+NanoTensor
+smoke 仍全绿
+持久化与缓存
+OPFS 持久化
+File System Access API
+DDC 编译缓存
+资源缓存
+.glb 往返校验
+场景 / 脚本 / 资产自动持久化，刷新浏览器不丢失工作区
