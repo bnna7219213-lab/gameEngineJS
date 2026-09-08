@@ -1,11 +1,14 @@
 # engine_tensorflow+js
 
 `c:\engine_refactored`（C++17 + DX12/Software 双后端 RHI + Python Tkinter IDE）的
-**全功能对等 JS 重构版**：在浏览器端用自研引擎（无需 three.js）实现计算与推理渲染。
+**全功能对等 JS 重构版**：在浏览器端用自研引擎（无需 three.js）实现计算与推理渲染，
+并集成 **Blender 式建模模块**（任意手工拓扑 + 纯 JS 脚本命令后台）。
 
 ## 一句话定位
 
 - **渲染**：自研引擎，WebGPU（L3，含 compute）→ WebGL2（L1/L2）→ Software（L0，黄金参考）三级后端。
+- **建模**：Blender 式建模模块（half-edge 拓扑内核 + 修改器栈 + 属性选项卡），
+  配套**纯 JS 脚本命令后台**（data/ctx/ops 三命名空间，GUI 与脚本共用命令总线，可撤销）。
 - **计算推理**：TensorFlow.js 直接在浏览器端执行模型推理（神经材质 / DDGI 去噪 / 超分 / AI 策略），
   `@tensorflow/tfjs` 为**可选依赖**，缺失时降级到内置纯 JS 张量引擎 `NanoTensor`。
 - **编辑器**：Web 版 IDE（原生 DOM，无框架，无构建步骤），功能对等 `python/ide`。
@@ -19,11 +22,28 @@ node serve.mjs            # 默认 http://localhost:8080/ ，打开后进入 src
 # 或任意静态服务器：python -m http.server 8080
 
 # 全量 smoke 验收（Node 22，无需浏览器）
-node tools/run_smoke.js          # 全部
-node tools/run_smoke.js core_    # 按前缀过滤
+node tools/run_smoke.js          # 全部（当前 50 个 smoke / 1596 断言，全绿）
+node tools/run_smoke.js core_    # 按前缀过滤（core_/render_/sim_/plat_/editor_/rhi_/...）
 ```
 
 > 未安装 `@tensorflow/tfjs` 时**所有推理走 NanoTensor 参考路径**，smoke 必须仍然全绿（硬性要求）。
+
+## 路线图
+
+| 版本 | 主题 | 状态 | 文档 |
+|---|---|---|---|
+| v1 | 取代 three.js：自研 WebGL2/WebGPU/Software 三级后端 + Web IDE | ✅ 已落地 | `plan v1.md` |
+| v2 | 对标 Unity6 日常开发闭环：物理 3D / 音频 / 网络 / WebGPU 真实化 / 多人协作 / 静态导出 | 🟢 进行中（Q1 物理 ✅ + Q5 Worker 协议 ✅） | `plan.md` |
+| v3 | **Blender 式建模模块**：任意手工拓扑 / 场景 / 视图 / 渲染 / 工具 / 输出 / 世界环境 / 物体 / 粒子 / 物理属性 / 材质选项卡 / 修改器与约束 / **纯 JS 脚本命令后台** | 📋 规划（v3.1，含 10 项硬伤审计修复） | `plan v3.md` |
+
+**v3 要点**（详见 `plan v3.md`）：
+- **拓扑内核**：half-edge 编辑内核 + 派生 SoA 三角渲染缓存，支持挤出/环切/倒角/合并/细分/桥接等算子。
+- **脚本后台**：纯 JS 命令 API（`data`/`ctx`/`ops` 三命名空间 + `undoGroup`），复用 gbhy 机制，
+  零解释器、零 Python；GUI 按钮与脚本算子走同一命令总线，结果可撤销且哈希一致。
+- **属性选项卡**：对标 Blender Properties 编辑器（工具/渲染/输出/视图层/场景/世界/物体/修改器/
+  粒子/物理/约束/材质/网格数据 13 个选项卡），注册表驱动。
+- **前置修复（M-A0）**：修复场景反序列化 id 分裂、children 双向腐化，新增确定性哈希工具，
+  为命令层提供稳定引用与可断言基础。
 
 ## 代码工作台：边调试边热加载边运行（Debug 模式）
 
@@ -62,18 +82,24 @@ node tools/run_smoke.js core_    # 按前缀过滤
 ## 目录
 
 ```
-src/engine/core/      math / memory / job / determinism / profiler / cvar / capability / contracts / json / log / engine
+src/engine/core/      math / memory / job / determinism / profiler / cvar / capability / contracts /
+                      json / log / engine / hash(v3 新增：确定性哈希)
 src/engine/render/    rhi(抽象) / rhi_software / rhi_webgl2 / rhi_webgpu / render_graph / deferred_pbr /
                       meshlet / hiz / visibility_buffer / taa / vrs / virtual_texturing /
                       lightmap / ddgi / restir / neural_material / virtual_geometry / paired_render /
-                      frame_predict / frame_interp / temporal / viewport3d
-src/engine/sim/       ecs / ecs_archetype / physics / physics3d / cloth / solver_ode / solver_linear /
-                      fluid / solver_pde / ai / animation
+                      frame_predict / frame_interp / temporal / viewport3d / pbr / postfx / ibl /
+                      lights / cull / instance_buffer / primitives / text / scene_render / skin
+src/engine/sim/       ecs / ecs_archetype / physics / physics3d / world3d / epa / character /
+                      cloth / solver_ode / solver_linear / fluid / solver_pde / ai / animation / particles
+src/engine/modeling/  hedit(half-edge 内核) / modifier(修改器栈)   【v3 新增】
 src/engine/platform/  vfs / asset_pipeline / ddc / prefab / hot_reload / cvar_console / scene / scene3d /
-                      hydrator / exporter / runtime / scripting / network / audio / resource
+                      hydrator / exporter / runtime / scripting / network / audio / resource /
+                      gltf / image / job_worker / play_session / texture_bridge / demo_action3d
 src/engine/infer/     tensor(NanoTensor) / tfjs_backend / inference / neural
-src/editor/           index.html + 视口/层级/检视器/资源/控制台(gbhy)/时间轴/性能HUD/命令面板/...
-tools/smoke/          *_.js 测试套件（run_smoke.js 自动发现）
+src/editor/           index.html + 视口/层级/检视器/资源/控制台(gbhy)/时间轴/性能HUD/命令面板/.../
+                      modeling/(建模命令层/脚本 API) / mode(模式状态机)   【v3 新增】
+tools/smoke/          *_smoke.js 测试套件（run_smoke.js 自动发现，前缀分层 core_/render_/sim_/plat_/
+                      editor_/rhi_/gi_/infer_，v3 新增 plat_modeling_*/editor_modeling_*）
 games/                breakout / space_shooter / match3 / action3d
 docs/                 架构 / 移植映射 / 推理说明
 ```
@@ -84,5 +110,7 @@ docs/                 架构 / 移植映射 / 推理说明
 - **E. 可选层缺失即降级，不崩溃**：WebGPU / WebGL2 / TF.js / Worker 全部可选。
 - **F. 编辑器 → 运行时单向**：编辑器数据模型不被运行时反向改写。
 - **矩阵行主序**：`m[row*4+col]`，列向量右乘 `v' = M·v`，平移在第 4 列；`vp = proj·view`。
+- **零运行时依赖**：禁止引入 three.js/babylon/Pyodide 或任何第三方库（建模脚本后台为纯 JS）。
 
-详见 `CONTRACT.md`（并行开发的唯一事实来源）与 `docs/PORTING.md`（C++ 子系统 → JS 文件映射）。
+详见 `CONTRACT.md`（并行开发的唯一事实来源）、`docs/PORTING.md`（C++ 子系统 → JS 文件映射）、
+`plan.md`（v2 路线图）与 `plan v3.md`（v3 建模模块路线图）。
