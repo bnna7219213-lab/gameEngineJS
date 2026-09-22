@@ -9,6 +9,10 @@
 > **基线核实（2026-09-08）**：`node tools/run_smoke.js` = **PASS=50 FAIL=0 ASSERTIONS=1596**。
 > src 共 10058 行。v1+v2 全部 smoke 在 v3 全程**不得回退**（红线 B）。
 >
+> **最新基线（2026-09-22）**：`node tools/run_smoke.js` = **PASS=76 FAIL=0 ASSERTIONS=2368**。
+> **v3 的 M-A0 ~ M-F 七个阶段已全部落地**（逐阶段证据见各阶段末尾的 `> 进度` 块）。
+> 同期新增 `vdom diff 游戏版`（Vue2 patch 内核 + 三宿主，见 `docs/VDOM.md`）。
+>
 > **不变约束**：CONTRACT.md 全部红线（零运行时依赖、无构建步骤、ES2022、DOM 隔离、
 > 行主序矩阵、确定性 Rng、CPU 黄金参考永不下线、可选层缺失即降级、编辑器→运行时单向）。
 > 建模内核与脚本后台 100% 在浏览器，**纯 JS 实现**，禁止引入 three.js/babylon/Pyodide
@@ -389,6 +393,32 @@ export function commandHash(cmd)               // cmd.toJSON() + fnv1a
 
 **出口**：模型可导出 OBJ/glTF，与主流 DCC（含 Blender）互操作。
 
+> **2026-09-22 进度**：M-F 已落地 ✅（76 smoke / 2368 断言全绿，零回退）：
+> - 新增 `src/engine/platform/export_mesh.js`（~800 行，纯函数、DOM-free、零依赖）：
+>   · **坐标/单位变换层（D33）**：4 预设 `YUP_M / YUP_CM / ZUP_M / ZUP_CM`；
+>     Y-up→Z-up 采用 Blender 官方 glTF 换算 `(x,y,z)→(x,−z,y)`，det>0 手性保持故**不翻缠绕**；
+>     法线用左上 3×3 的**逆转置**（非均匀缩放下正确），奇异矩阵/含镜像显式抛错（红线 A）。
+>   · **OBJ + MTL 写出**：世界矩阵烘焙进顶点；MTL 的 Kd/Ke 按 `Color.toSRGB()` 转出（显示参考），
+>     Pr/Pm 保留线性 PBR，`Ns = 2/roughness²−2`（写明为导出侧近似）。
+>   · **OBJ/MTL 读回**：两遍解析，输出顶点槽位 = 文件 `v` 序号 → **float32 逐位往返**；
+>     支持 n-gon 扇形三角化、负数索引自尾计、引用不存在顶点抛错。
+>   · **glTF 2.0 写出**：`.gltf`（内嵌 base64）+ `.glb`（12 字节头 + JSON/BIN chunk，4 字节对齐）；
+>     POSITION 带 min/max；索引按 65535 阈值选 u16/u32 并保证 u16 偏移 4 字节对齐；材质按参数去重。
+>   · **TRS 分解**：列长取缩放、列归一化取旋转、Shepperd 分支反解四元数；零缩放轴/镜像抛错。
+>   · **场景级入口** `exportScene(scene, {format, axis, rotationUnit, materialLibrary, applyModifiersFn})`，
+>     修改器栈经求值后导出（非破坏性，D27）。
+> - 编辑器接线：`main.js` 新增三条导出命令（OBJ/glTF/GLB）；`inspector.js` 新增场景级
+>   「输出 Output」选项卡（格式/坐标单位/旋转单位，写 `project.output`）；`registry.js` 新增 `OUTPUT_FIELDS`。
+> - 脚本 API：`ops.export.obj/gltf/glb`（`editor/modeling/api.js`），与 GUI 共用 `exportScene`，
+>   产物**逐字节一致**（smoke 断言）。
+> - 新增 smoke（2 个 / 172 断言）：`plat_export_mesh`(144) / `editor_modeling_export`(28)。
+> - 外部工具交叉验证：用**独立 Python 脚本**（struct/json，不依赖本工程代码）解析导出的 GLB——
+>   magic/版本/声明长度一致、chunk 布局正确、accessor min/max 与实测吻合、索引全部 < vertexCount；
+>   OBJ 面索引 1-based 合法、MTL Kd 落在 0..1。
+> - **已知边界**（代码注释中显式记录，非静默）：glTF 不表达逐角点属性差异（同 `v` 序号被多组
+>   vt/vn 引用时取首个）；glTF 不支持负缩放节点（镜像对象导出抛错而非静默产出错误几何）；
+>   贴图/图片槽位尚未写入 glTF（当前为参数级材质）。
+
 ---
 
 ## 4. 阶段依赖与并行
@@ -407,18 +437,34 @@ M-C 与 M-B 共用命令总线（M-A 先行），文件零重叠可并行；M-E 
 
 ## 5. 规模估计
 
-| 阶段 | 规模（估） | 关键交付 |
-|---|---|---|
-| M-A0 | ~300 行 | id/children/哈希修复 + 命名规范 |
-| M-A | ~1800 行 | half-edge 内核 + 命令总线 + 面板框架 + Material/World + 模式状态机 |
-| M-B | ~2200 行 | 编辑模式交互 + P0 算子 + gizmo 补全 + 视口缓存化 |
-| M-C | ~800 行 | 建模脚本 JS API（data/ctx/ops/undoGroup） |
-| M-D | ~1000 行 | 修改器栈 + 约束 |
-| M-E | ~900 行 | 物理/粒子/材质选项卡 + normalMap |
-| M-F | ~500 行 | OBJ/glTF 导出 + 坐标变换 |
+| 阶段 | 规模（估） | 状态 | 关键交付 |
+|---|---|---|---|
+| M-A0 | ~300 行 | ✅ | id/children/哈希修复 + 命名规范 |
+| M-A | ~1800 行 | ✅ | half-edge 内核 + 命令总线 + 面板框架 + Material/World + 模式状态机 |
+| M-B | ~2200 行 | ✅ | 编辑模式交互 + P0 算子 + gizmo 补全 + 视口缓存化 |
+| M-C | ~800 行 | ✅ | 建模脚本 JS API（data/ctx/ops/undoGroup） |
+| M-D | ~1000 行 | ✅ | 修改器栈 + 约束 |
+| M-E | ~900 行 | ✅ | 物理/粒子/材质选项卡 + normalMap |
+| M-F | ~500 行 | ✅ | OBJ/glTF 导出 + 坐标变换 |
 
 合计约 +7500 行核心代码 + smoke/夹具；7 个独立可验收阶段（含 M-A0）。
-基线 50 smoke / 1596 断言全程不得回退。
+基线 50 smoke / 1596 断言全程不得回退；**当前 76 smoke / 2368 断言全绿**。
+
+**v3 出口达成情况**（逐项对照 §3 各阶段出口）：
+- M-A0/M-A 出口「50+9 smoke 全绿」✅（实际超出）。
+- M-B 出口「可徒手挤出/环切/合并并全程撤销；静态场景重建计数=0」✅（数据层与 smoke 断言通过；
+  浏览器内手动验收未做，见下）。
+- M-C 出口「一段 JS 脚本可粘贴运行生成程序化模型，与 GUI 共享命令栈、meshHash 一致」✅。
+- M-D 出口「修改器/约束几何与变换断言」✅。
+- M-E 出口「物理/粒子/材质/World 断言」✅。
+- M-F 出口「模型可导出 OBJ/glTF，与 DCC 互操作」✅（经独立解析器交叉验证；未用真实 Blender 打开）。
+
+**未做（明确标注）**：
+1. 浏览器内手动验收（M-B 徒手建模、M-E World/材质选项卡 UI、M-F 实际点击导出）——仅完成数据层
+   与 Node headless 断言；未在真实浏览器交互验证，也未用真实 Blender 打开导出文件。
+2. M-D 待续：修改器/约束选项卡 UI 渲染、Play 模式约束每帧求解接线。
+3. M-E 待续：World/材质选项卡 UI 渲染。
+4. Boolean 修改器（流形 CSG）按 §6.4 仍列 P3，未实现。
 
 ## 6. 风险与不可行点
 

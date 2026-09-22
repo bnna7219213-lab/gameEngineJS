@@ -222,7 +222,7 @@ function onFrame() {
 
 ```bash
 node tools/run_smoke.js plat_vdom    # 81 断言：算法 + 三 host + 响应式
-node tools/run_smoke.js              # 全量回归（当前 73 smoke / 2288 断言全绿）
+node tools/run_smoke.js              # 全量回归（当前 76 smoke / 2368 断言全绿）
 ```
 
 覆盖点：`h/sameVnode`（含 input type 特例）、挂载/文本/注释、`updateChildren`（key 乱序/增删/移动复用/reverse）、

@@ -65,11 +65,13 @@ void main(){
 }`;
 
 // ---------- CPU 参考（红线 D：黄金参考先行，与 GLSL 逐式对应）----------
-// 运动矢量：prevClip→curClip 的 NDC 位移（与 MOTION_VS 同式）
+// 运动矢量：prevClip→curClip 的 NDC 位移（与 MOTION_VS 同式）。
+// 注意：NDC 需要 w 分量做透视除法，故用 applyClip（applyPoint 是仿射变换、不含 w）。
 export function motionVector(prevViewProj, viewProj, model, worldPos) {
-  const cur = viewProj.mul(model).applyPoint(worldPos);
-  const prev = prevViewProj.mul(model).applyPoint(worldPos);
-  const cw = cur.w || 1e-6, pw = prev.w || 1e-6;
+  const cur = viewProj.mul(model).applyClip(worldPos);
+  const prev = prevViewProj.mul(model).applyClip(worldPos);
+  const cw = Math.abs(cur.w) > 1e-6 ? cur.w : 1e-6;
+  const pw = Math.abs(prev.w) > 1e-6 ? prev.w : 1e-6;
   return [cur.x / cw - prev.x / pw, cur.y / cw - prev.y / pw];
 }
 

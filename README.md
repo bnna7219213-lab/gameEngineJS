@@ -25,9 +25,11 @@ node serve.mjs            # 默认 http://localhost:8080/ ，打开后进入 src
 # 或任意静态服务器：python -m http.server 8080
 
 # 全量 smoke 验收（Node 22，无需浏览器）
-node tools/run_smoke.js          # 全部（当前 73 个 smoke / 2288 断言，全绿）
+node tools/run_smoke.js          # 全部（当前 76 个 smoke / 2368 断言，全绿）
 node tools/run_smoke.js core_    # 按前缀过滤（core_/render_/sim_/plat_/editor_/rhi_/...）
 node tools/run_smoke.js plat_vdom  # vdom diff（Vue2 patch 内核 + 三 host + 响应式，81 断言）
+node tools/run_smoke.js plat_modeling  # v3 建模内核（half-edge/命令/修改器/脚本 API）
+node tools/run_smoke.js render_taa     # v2 Q3 TAA（运动矢量 + resolve，42 断言）
 ```
 
 > 未安装 `@tensorflow/tfjs` 时**所有推理走 NanoTensor 参考路径**，smoke 必须仍然全绿（硬性要求）。
@@ -37,17 +39,37 @@ node tools/run_smoke.js plat_vdom  # vdom diff（Vue2 patch 内核 + 三 host + 
 | 版本 | 主题 | 状态 | 文档 |
 |---|---|---|---|
 | v1 | 取代 three.js：自研 WebGL2/WebGPU/Software 三级后端 + Web IDE | ✅ 已落地 | `plan v1.md` |
-| v2 | 对标 Unity6 日常开发闭环：物理 3D / 音频 / 网络 / WebGPU 真实化 / 多人协作 / 静态导出 | 🟢 进行中（Q1 物理 ✅ + Q5 Worker 协议 ✅） | `plan.md` |
-| v3 | **Blender 式建模模块**：任意手工拓扑 / 场景 / 视图 / 渲染 / 工具 / 输出 / 世界环境 / 物体 / 粒子 / 物理属性 / 材质选项卡 / 修改器与约束 / **纯 JS 脚本命令后台** | 📋 规划（v3.1，含 10 项硬伤审计修复） | `plan v3.md` |
+| v2 | 对标 Unity6 日常开发闭环：物理 3D / 音频 / 网络 / WebGPU 真实化 / 多人协作 / 静态导出 | 🟢 进行中（Q1 物理 ✅ 含 runtime 接线 / Q2 音频+网络 ✅ / Q3 TAA 内核 ✅ / Q5 Worker 协议 ✅） | `plan.md` |
+| v3 | **Blender 式建模模块**：任意手工拓扑 / 场景 / 视图 / 渲染 / 工具 / 输出 / 世界环境 / 物体 / 粒子 / 物理属性 / 材质选项卡 / 修改器与约束 / **纯 JS 脚本命令后台** | ✅ **M-A0~M-F 全部落地** | `plan v3.md` |
+| vdom | **Vue2 vdom diff（游戏版）**：patch/updateChildren 内核 + Scene3D/DOM/mock 三宿主 + 响应式封装 | ✅ 已落地 | `docs/VDOM.md` |
 
-**v3 要点**（详见 `plan v3.md`）：
-- **拓扑内核**：half-edge 编辑内核 + 派生 SoA 三角渲染缓存，支持挤出/环切/倒角/合并/细分/桥接等算子。
+**v3 状态总览**（详见 `plan v3.md`，逐阶段进度见该文件内 `> 2026-09-08 进度` 块）：
+
+| 阶段 | 内容 | 状态 | 新增 smoke |
+|---|---|---|---|
+| M-A0 | 前置修复：H1 id 分裂 / H2 children 腐化 / H7 确定性哈希 / H10 命名规范 | ✅ | core_hash、plat_scene_id |
+| M-A | half-edge 拓扑内核 + 命令总线 + 属性选项卡框架 + Material/World 数据块 + 模式状态机 | ✅ | plat_modeling_hedit、plat_modeling_undo、plat_material、editor_mode、editor_tabs |
+| M-B | 建模交互视口：H5 gizmo 修复 / H8 视口资源缓存 / 顶点边面拾取 / P0 算子 GUI 化 / dirty 增量重建 | ✅ | render_viewport_cache、editor_gizmo、plat_modeling_ops、plat_modeling_pick、editor_modeling_session |
+| M-C | 建模脚本 JS API：`data`/`ctx`/`ops`/`undoGroup` + gbhy 注入 | ✅ | editor_modeling_api |
+| M-D | 修改器栈（Subdiv/Mirror/Array/Solidify/Bevel/Weld/Triangulate）+ 约束（Copy/TrackTo/Limit） | ✅ | sim_constraint、plat_modeling_modifier_cmd |
+| M-E | 物理/粒子/材质选项卡吃全 + normalMap 真进渲染 + World 下发 | ✅ | editor_physics、sim_particles_ext、render_normalmap、plat_world_viewport |
+| M-F | **输出**：OBJ/MTL 与 glTF/GLB 写出读回 + 坐标/单位变换层（D33） | ✅ | plat_export_mesh、editor_modeling_export |
+
+**v3 要点**：
+- **拓扑内核**：half-edge 编辑内核（`engine/modeling/hedit.js`）+ 派生 SoA 三角渲染缓存，
+  支持挤出/环切/倒角/合并/细分/桥接等算子；`validate()` 校验 6 项不变量。
 - **脚本后台**：纯 JS 命令 API（`data`/`ctx`/`ops` 三命名空间 + `undoGroup`），复用 gbhy 机制，
-  零解释器、零 Python；GUI 按钮与脚本算子走同一命令总线，结果可撤销且哈希一致。
+  零解释器、零 Python；GUI 按钮与脚本算子走同一命令总线，结果可撤销且 meshHash 一致。
 - **属性选项卡**：对标 Blender Properties 编辑器（工具/渲染/输出/视图层/场景/世界/物体/修改器/
   粒子/物理/约束/材质/网格数据 13 个选项卡），注册表驱动。
 - **前置修复（M-A0）**：修复场景反序列化 id 分裂、children 双向腐化，新增确定性哈希工具，
   为命令层提供稳定引用与可断言基础。
+- **输出（M-F）**：OBJ+MTL / glTF / GLB 三格式写出与读回，`exportScene()` 场景级入口，
+  四个坐标/单位预设（YUP_M/YUP_CM/ZUP_M/ZUP_CM），法线用逆转置矩阵，含镜像/奇异矩阵显式报错。
+  脚本侧 `ops.export.obj/gltf/glb` 与 GUI 导出共用同一函数（产物逐字节一致）。
+- **vdom diff**：完整移植 Vue2 `patch/updateChildren`（key 乱序/双端比较/移动复用），
+  平台无关——同一套算法驱动 Scene3D 游戏对象树 / 真实 DOM / 内存 mock 树；
+  配套 `VDomReactive`（Proxy 自动 diff + watch/computed）。
 
 ## 代码工作台：边调试边热加载边运行（Debug 模式）
 
@@ -89,16 +111,18 @@ node tools/run_smoke.js plat_vdom  # vdom diff（Vue2 patch 内核 + 三 host + 
 src/engine/core/      math / memory / job / determinism / profiler / cvar / capability / contracts /
                       json / log / engine / hash(v3 新增：确定性哈希)
 src/engine/render/    rhi(抽象) / rhi_software / rhi_webgl2 / rhi_webgpu / render_graph / deferred_pbr /
-                      meshlet / hiz / visibility_buffer / taa / vrs / virtual_texturing /
-                      lightmap / ddgi / restir / neural_material / virtual_geometry / paired_render /
-                      frame_predict / frame_interp / temporal / viewport3d / pbr / postfx / ibl /
-                      lights / cull / instance_buffer / primitives / text / scene_render / skin
+                      meshlet / hiz / visibility_buffer / taa / taa_gpu(运动矢量+TAA resolve, Q3) /
+                      vrs / virtual_texturing / lightmap / ddgi / restir / neural_material /
+                      virtual_geometry / paired_render / frame_predict / frame_interp / temporal /
+                      viewport3d / pbr / postfx / ibl / lights / cull / instance_buffer / primitives /
+                      text / scene_render / skin
 src/engine/sim/       ecs / ecs_archetype / physics / physics3d / world3d / epa / character /
                       cloth / solver_ode / solver_linear / fluid / solver_pde / ai / animation / particles
 src/engine/modeling/  hedit(half-edge 内核) / modifier(修改器栈)   【v3 新增】
 src/engine/platform/  vfs / asset_pipeline / ddc / prefab / hot_reload / cvar_console / scene / scene3d /
-                      hydrator / exporter / runtime / scripting / network / audio / resource /
-                      gltf / image / job_worker / play_session / texture_bridge / demo_action3d
+                      hydrator / exporter / export_mesh(OBJ/glTF 导出, M-F) / runtime / scripting /
+                      network / net_ws(WebSocket 传输, Q2) / audio / audio_web(WebAudio 桥, Q2) /
+                      resource / gltf / image / job_worker / play_session / texture_bridge / demo_action3d
 src/engine/infer/     tensor(NanoTensor) / tfjs_backend / inference / neural
 src/engine/vdom/      vnode / patch(Vue2 diff 内核) / modules / gnode_host(Scene3D 游戏对象树) /
                       dom_host(真实 DOM+mock) / index(VDomApp/VDomReactive/工厂)   【vdom 新增】

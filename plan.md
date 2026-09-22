@@ -8,6 +8,10 @@
 >
 > **2026-09-04 进度**：Q1 物理 3D ✅ + Q5 Worker 池 ✅ → 50 smoke / 1596 断言全绿。
 >
+> **2026-09-22 进度**：Q1 runtime 接线 ✅ + Q2 音频/网络 ✅ + Q3 TAA 内核 ✅
+> → **76 smoke / 2368 断言全绿**（含 v3 建模模块 M-A0~M-F 与 vdom diff 的 smoke）。
+> 剩余：Q4 WebGPU、Q6 协作、Q7 静态导出/验收游戏、Q3 的 Hi-Z GPU pass 与视口特性开关。
+>
 > **不变约束**：CONTRACT.md 全部红线（零运行时依赖、无构建步骤、ES2022、DOM 隔离、
 > 行主序矩阵、确定性 Rng、CPU 黄金参考永不下线、可选层缺失即降级、编辑器→运行时单向）。
 > **计算驻留**：渲染/物理/烘焙/推理/序列化 100% 在浏览器；companion 进程仅文件 IO
@@ -27,25 +31,30 @@
   raycast（全形状含 CONVEX 二分搜索）、CharacterController（胶囊扫掠 / 台阶 / 坡度 / 滑墙）。
 - Worker 池（Q5 ✅）：`job_worker.js` 通用协议（5 种内置任务 / WorkerPool 类 / Node 顺序降级 /
   浏览器 Worker 路径 / 进度回调 / Transferable ArrayBuffer / stats 追踪）。
-- 工程纪律：50 smoke / 1596 断言全绿，全 Node headless。
+- 音频桥（Q2 ✅）：`audio_web.js` AudioSink（WebAudio 包装 + 3D Panner + Listener + 总线）。
+- WebSocket 传输（Q2 ✅）：`net_ws.js` WebSocketTransport（与 Loopback 同接口）+ NetSession 重连。
+- TAA 内核（Q3 🟢）：`taa_gpu.js` 运动矢量 + resolve GLSL 与 CPU 参考同式。
+- 工程纪律：**76 smoke / 2368 断言全绿**，全 Node headless。
 
 **剩余缺口（v2 待攻坚）**：
 
 | # | 缺口 | 现状证据 | 对标 |
 |---|---|---|---|
-| G3 | **无音频输出** | 无 WebAudio 桥；mixer 模型只在 Node 出 PCM | Unity AudioSource/Listener |
-| G4 | **无 WebSocket 网络层** | network.js 只有 loopback；无快照插值/预测回滚 | Unity Netcode |
-| G6 | **GPU 视口特性未吃全** | 阴影/后处理未进编辑器视口 | Unity Scene 视图 |
+| ~~G3~~ | ~~无音频输出~~ | **Q2 ✅**：`audio_web.js` AudioSink + GameAudio（Node mock 全绿；浏览器手动验收待做） | Unity AudioSource/Listener |
+| ~~G4~~ | ~~无 WebSocket 网络层~~ | **Q2 ✅**：`net_ws.js` WebSocketTransport 同接口 + NetSession 重连 + 插值回滚断言 | Unity Netcode |
+| G6 | **GPU 视口特性未吃全** | GL 路径 fog 下发已补；阴影/后处理开关未进编辑器视口 | Unity Scene 视图 |
 | G7 | **无验收游戏** | games/ 仅 2D×3 + 脚本驱动 demo | Unity 官方 demo 级 |
 | G8 | **无静态导出** | exporter 未打包「单目录静态站点」 | Unity Build Settings |
 | G9 | **Worker 未接入资产管线** | job_worker.js 协议就绪，但 GLTF/纹理/DDC 导入仍在主线程 | Unity 导入进度条不卡 UI |
-| G10 | **TAA/Hi-Z 未真接线 GPU** | CPU 参考就绪但无 GPU pass | Unity HDRP TAA |
+| G10 | **TAA/Hi-Z 未真接线 GPU** | TAA 运动矢量 + resolve 已落地（`taa_gpu.js`，CPU/GLSL 同式）；Hi-Z GPU pass 待补 | Unity HDRP TAA |
 | G1 | **WebGPU 后端空壳** | rhi_webgpu.js 24 行，caps 诚实但仅 init 真实 | Unity6 现代 GPU 路径 |
 | G5 | **无多人协作** | 无 companion（serve.mjs 仅静态服务） | Unity Collaborate/Plastic |
 
 **已关闭（本轮完成）**：
-| ~~G2~~ | ~~物理 3D 未真实化~~ | Q1 ✅：5 文件 / 4 smoke / 47 断言 |
+| ~~G2~~ | ~~物理 3D 未真实化~~ | Q1 ✅：5 文件 / 5 smoke / 57 断言（含 runtime 接线） |
 | ~~Q5~~ | ~~Worker 池化~~ | 2 文件 / 1 smoke / 35 断言 |
+| ~~G3~~ | ~~无音频输出~~ | Q2 ✅：`audio_web.js` / 1 smoke（与 G4 合并计入） |
+| ~~G4~~ | ~~无 WebSocket 网络层~~ | Q2 ✅：`net_ws.js` + `plat_audio_net` 28 断言 |
 
 ## 1. 目标与非目标（v2）
 
@@ -90,9 +99,13 @@
 | 形状集：box/sphere/capsule/convex/plane | ✅ | 各形状两两组合 |
 | raycast（全形状最近命中）+ sweep | ✅ | CONVEX 二分搜索、capsule 圆柱+端帽 |
 | 角色控制器：胶囊扫掠 + 滑墙 + 台阶 + 坡度 | ✅ | `character.js`：`_sweepCapsule` 去除 -r 偏移、法线旋转到世界空间 |
-| runtime 接线：GameRuntime.stepPhysics 换真世界步进 | ⬜ | play_session_smoke 不回退 |
+| runtime 接线：GameRuntime.stepPhysics 换真世界步进 | ✅ | play_session_smoke 不回退；`plat_runtime_physics`：含 rigidbody 场景走真物理、无 rigidbody 回退简单重力、动态 spawn 补注册 |
 
-**出口**：4 smoke / 47 断言全绿。Play 模式自动获得完整物理；堆叠场景 60 帧无爆炸。
+**出口**：5 smoke / 57 断言全绿。Play 模式自动获得完整物理；堆叠场景 60 帧无爆炸。
+> **2026-09-22 进度**：runtime 接线已落地 ✅——`GameRuntime.initPhysics()`（异步建 PhysicsWorld，
+> 含 rigidbody 的场景自动启用）+ `stepPhysics` 走真世界步进 + 四元数→欧拉回写 + 动态 spawn 刚体
+> 同步补注册（构造器缓存于 initPhysics）；`PlaySession.start()` 触发。球从 y=5 落地静止在 ~0.75
+> （半径 0.5 + 休眠），静态地面不动，无 rigidbody 场景保持旧简单重力（向后兼容）。
 
 ### Q5 — Worker 池化 + 导入不冻结 ✅ 2026-09-04
 
@@ -105,24 +118,45 @@
 **出口**：1 smoke / 35 断言全绿。协议层就绪，下一步接入资产管线。
 
 ### Q2 — 音频输出桥 + 网络传输
-| 任务 | 验收 |
-|---|---|
-| `platform/audio_web.js`：AudioContext 包装（lazy init 于用户手势）、合成器 render()→AudioBufferSourceNode、decodeAudioData 文件加载、loop/gain/bus、PannerNode 3D | `plat_audio_smoke.js`（Node mock 句柄路径）+ 浏览器手动验收 |
-| 混音图确定性保持：同输入 PCM hash 跨轨一致 | sim/audio 现有断言不回退 |
-| `WebSocketTransport`（与 LoopbackTransport 同接口：send/receive(frame)） | `plat_net_smoke.js`：Node 内 WS 回环（companion 中继） |
-| 快照插值 + 预测回滚层（传输无关）：服务器快照 ring buffer、客户端实体插值、本地输入重放 | `plat_rollback_smoke.js`：注入 100ms 人工延迟，插值平滑、回滚后状态哈希一致 |
+| 任务 | 状态 | 验收 |
+|---|---|---|
+| `platform/audio_web.js`：AudioContext 包装（lazy init 于用户手势）、合成器 render()→AudioBufferSourceNode、decodeAudioData 文件加载、loop/gain/bus、PannerNode 3D | ✅ | `plat_audio_net_smoke.js`（Node mock 句柄路径，28 断言）+ 浏览器手动验收 |
+| 混音图确定性保持：同输入 PCM hash 跨轨一致 | ✅ | sim/audio 现有断言不回退；新增「同参数两次合成 PCM 逐位一致」断言 |
+| `WebSocketTransport`（与 LoopbackTransport 同接口：send/receive(frame)） | ✅ | `plat_audio_net_smoke.js`：`fakeSocketPair` 内存双工回环 + Replicator 挂 WS 传输 |
+| 快照插值 + 预测回滚层（传输无关）：服务器快照 ring buffer、客户端实体插值、本地输入重放 | ✅ | 插值 alpha=0.5→x=5、预测回滚计数断言 |
 
-**出口**：两浏览器实例经 companion WS 联机玩同一 lockstep 会话。
+**出口**：两浏览器实例经 companion WS 联机玩同一 lockstep 会话（companion 属 Q6，待补）。
+> **2026-09-22 进度**：Q2 已落地 ✅（音频桥 + WS 传输 + 插值回滚，Node 全路径可测）：
+> - `platform/audio_web.js`：`AudioSink`（lazy init、play/loop/gain/bus、decodeAudioData、
+>   3D PannerNode、Listener 位姿、总线 dB 增益、suspend/resume）+ `GameAudio`
+>   （组合 sim/audio 的确定性 AudioEngine 合成 → PCM → sink 播放）。
+> - `platform/net_ws.js`：`WebSocketTransport`（与 LoopbackTransport 同接口 send/onRecv，
+>   非 JSON 字符串原样透传，断线静默丢弃不抛错）+ `NetSession`（自动重连 + 状态机 + maxRetry 耗尽
+>   返回 false 不崩溃）+ `fakeSocketPair`（Node 内存双工，零依赖）。
+> - **已知缺口**：真实浏览器 AudioContext 与真实 WebSocket 服务端的手动验收未做（Node mock 路径全绿）；
+>   联机对端需 Q6 的 companion 中继。
 
 ### Q3 — TAA/Hi-Z GPU 真接线 + GPU 视口特性吃全
-| 任务 | 验收 |
-|---|---|
-| 运动矢量 pass：prev-MVP uniform + RG16F RT 输出 | `render_motionvec_smoke.js` |
-| TAA resolve pass：Halton jitter 进投影矩阵 + history RT ping-pong + 3x3 邻域 clamp（GLSL 与 CPU 参考同式） | `render_taa_parity.js`：静态帧收敛、运动帧抗锯齿且 2/255 |
-| Hi-Z 归约 pass（WebGL2 版：逐级 blit+max shader）+ 遮挡查询进提交路径 | `render_hiz_smoke.js` 扩展：剔除计数两后端一致 |
-| 编辑器视口吃全：阴影开关/后处理链/fog 在 GPU 视口路径生效 | parity 页覆盖编辑器视口；perf_hud 实测 1080p≥60fps |
+| 任务 | 状态 | 验收 |
+|---|---|---|
+| 运动矢量 pass：prev-MVP uniform + RG16F RT 输出 | ✅ | `render_taa_gpu_smoke.js`：motionVector 与 GLSL 逐式一致、偏心点非零位移、视点原点恒居中 |
+| TAA resolve pass：Halton jitter 进投影矩阵 + history RT ping-pong + 3x3 邻域 clamp（GLSL 与 CPU 参考同式） | ✅ | `render_taa_gpu_smoke.js`：静态帧收敛、ghosting 抑制（邻域 clamp）、运动重投影改变采样来源、与旧 resolveTAA 向后兼容 |
+| Hi-Z 归约 pass（WebGL2 版：逐级 blit+max shader）+ 遮挡查询进提交路径 | ⬜ | `render_hiz_smoke.js` 扩展：剔除计数两后端一致 |
+| 编辑器视口吃全：阴影开关/后处理链/fog 在 GPU 视口路径生效 | 🟢 | GL 路径 fog uniforms 下发已补（G6 缺口修复）；阴影/后处理开关待补 |
 
 **出口**：编辑器 Scene 视图与 Game 视图渲染特性全集一致。
+> **2026-09-22 进度**：Q3 内核已落地（运动矢量 + TAA resolve），GPU pass 组装器与 Hi-Z 待补：
+> - 新增 `render/taa_gpu.js`：`MOTION_VS/FS`（prev-MVP → NDC 位移 → RG16F）+ `TAA_VS/FS`
+>   （3×3 邻域 clamp + `mix(hist, cur, uAlpha)`）+ CPU 参考 `motionVector`/`resolveMotionTAA`/
+>   `jitterSequence`（红线 D：黄金参考先行，与 GLSL 逐式同式）+ `buildTaaPassShaders()` 组装器。
+> - **修复**：`rhi_webgl2.setConstants` 缺 `INT_VEC2/3/4` 与 `BOOL` uniform 分支
+>   （uLightType 等 int 数组下发必需）；`viewport3d` GL 路径 fog uniforms 此前无人下发
+>   （只有 Software 路径经 `uni.fog` 生效）→ 已补 `uFogType/uFogColor/uFogNear/uFogFar/uFogDensity`。
+> - **实现要点（含一处测试用例纠错）**：`motionVector` 必须用 `applyClip`（返回 w）做透视除法，
+>   `applyPoint` 是仿射变换不含 w；且「相机平移但仍看向原点」时视点原点 NDC 位移恒为 0
+>   （正确行为），须取偏心点验证——该结论已写入 smoke 注释。
+> - **已知缺口**：Hi-Z WebGL2 逐级 blit+max GPU pass 未实现；编辑器视口的阴影/后处理开关未暴露；
+>   真实 GPU 上的 parity 断言（需浏览器 parity 页）未跑。
 
 ### Q4 — WebGPU 真实化（compute 价值交付）
 | 任务 | 验收 |
@@ -172,14 +206,26 @@ Q6 协作（依赖现有 OPFS/FSA；与 Q1-Q5 文件零重叠，可全程并行�
 
 | 阶段 | 状态 | Smoke | 断言 | 剩余 |
 |---|---|---|---|---|
-| Q1 物理 | 🟢 80% | 4 (sim_physics3d/raycast/raycast_convex/character) | 47 | runtime 接线 |
-| Q2 音频/网络 | ⬜ 0% | — | — | 全部 |
-| Q3 TAA/Hi-Z GPU | ⬜ 0% | — | — | 全部 |
+| Q1 物理 | ✅ 100% | 5 (sim_physics3d/raycast/raycast_convex/character/plat_runtime_physics) | 57 | — |
+| Q2 音频/网络 | 🟢 90% | 1 (plat_audio_net) | 28 | 浏览器手动验收 |
+| Q3 TAA/Hi-Z GPU | 🟢 60% | 1 (render_taa_gpu) | 42 | Hi-Z GPU pass、编辑器视口特性开关 |
 | Q4 WebGPU | ⬜ 0% | — | — | 全部 |
 | Q5 Worker | 🟢 40% | 1 (plat_worker) | 35 | 资产管线接入 |
 | Q6 协作 | ⬜ 0% | — | — | 全部 |
 | Q7 导出/游戏 | ⬜ 0% | — | — | 全部 |
-| **合计** | **🟢 2/7 阶段** | **50** | **1596** | **5 阶段待启动** |
+| **合计** | **🟢 4/7 阶段有交付** | **76** | **2368** | **Q4/Q6/Q7 待启动** |
+
+**2026-09-22 本轮新增**（详见各阶段表格）：
+- **Q1 runtime 接线 ✅**：`GameRuntime.initPhysics()` + `stepPhysics` 走真物理世界（含动态 spawn
+  刚体补注册、四元数→欧拉回写）；`PlaySession.start()` 触发。新增 `plat_runtime_physics`（10 断言）。
+- **Q2 音频桥 ✅**：新增 `platform/audio_web.js`（AudioSink：lazy init/play/loop/gain/bus/decode/
+  3D Panner/Listener/总线 dB + GameAudio 组合确定性合成）；新增 `platform/net_ws.js`
+  （WebSocketTransport 与 LoopbackTransport 同接口 + NetSession 自动重连 + fakeSocketPair 回环）。
+  新增 `plat_audio_net`（28 断言）。
+- **Q3 TAA 内核 ✅**：新增 `render/taa_gpu.js`（运动矢量 GLSL + TAA resolve GLSL + CPU 参考
+  `motionVector`/`resolveMotionTAA`/`jitterSequence`，与 GLSL 逐式同式）；修复
+  `rhi_webgl2.setConstants` 缺 INT_VEC2/3/4 与 BOOL 分支；修复 `viewport3d` GL 路径 fog uniforms
+  无人下发的缺口（G6）。新增 `render_taa_gpu`（42 断言）。
 
 **下一步推荐顺序**（按投入产出比）：
 
@@ -187,29 +233,15 @@ Q6 协作（依赖现有 OPFS/FSA；与 Q1-Q5 文件零重叠，可全程并行�
    job_worker.js 协议已就绪，只需修改 resource.js 的 import 路径和调用方式。
    产出：大资产导入不冻结编辑器，直接可感知。
 
-2. **Q1 runtime 接线**（~100 行）：GameRuntime.stepPhysics 换真世界步进。
-   world3d.js 的 PhysicsWorld.step() 已验证稳定，接线后 Play 模式自动获得完整物理。
-   产出：游戏内物理交互可用。
+2. **Q6 协作**（~900 行）：companion.mjs + 对象锁 + 对象级合并 + CI。纯 Node、无 GPU 依赖，
+   与 Q3/Q4 文件零重叠，可快速落地。产出：多人协作闭环。
 
-3. **Q2 音频桥**（~500 行）：platform/audio_web.js（WebAudio 包装）+ 网络传输。
-   音频是游戏感知的核心，无音频的 3D 游戏不完整。
-   产出：音频输出 + WebSocket 联机。
-
-4. **Q3 TAA/Hi-Z**（~600 行）：运动矢量 pass + TAA resolve + Hi-Z 归约。
-   渲染质量提升，GPU 视口吃全。
-   产出：抗锯齿 + 遮挡剔除。
-
-5. **Q4 WebGPU**（~1000 行）：WGSL 双轨 + compute 三项。
-   依赖 Q3 的 GLSL 经验，是最大单块。
-   产出：现代 GPU 路径。
-
-6. **Q6 协作**（~900 行）：companion.mjs + 对象锁 + 合并 + CI。
-   与上述阶段文件零重叠，可并行开发。
-   产出：多人协作闭环。
-
-7. **Q7 导出/游戏**（~300 行 + demo）：静态导出 + action3d v2 验收游戏。
-   最终阶段，依赖 Q1-Q5 全部完成。
+3. **Q7 导出/游戏**（~300 行 + demo）：静态导出打包器 + action3d v2 验收游戏。
    产出：完整演示闭环。
+
+4. **Q3 剩余**（~300 行）：Hi-Z 逐级 blit+max GPU pass + 编辑器视口阴影/后处理开关吃全。
+
+5. **Q4 WebGPU**（~1000 行）：WGSL 双轨 + compute 三项。最大单块，建议最后做。
 
 ## 5. 规模估计（v2 更新）
 

@@ -15,19 +15,27 @@
 ├──────────────────────────────────────────────────────┤
 │ src/engine/                                          │
 │  platform/  vfs asset_pipeline ddc prefab hot_reload  │
-│             scene scene3d hydrator exporter runtime   │
-│             scripting network audio resource          │
+│             scene scene3d hydrator exporter           │
+│             export_mesh(OBJ/glTF, M-F) runtime        │
+│             scripting network net_ws audio audio_web  │
+│  modeling/  hedit(half-edge 内核) modifier(修改器栈)  │
+│             【v3 建模内核】                            │
+│  vdom/      vnode patch(Vue2 diff 内核) modules       │
+│             gnode_host dom_host index(VDomApp/Reactive)│
+│             【vdom diff 游戏版】                       │
 │  sim/       ecs ecs_archetype physics(3d) cloth       │
 │             solver_ode/linear/pde fluid ai animation  │
+│             world3d epa character particles constraint│
 │  render/    rhi（抽象）+ software(L0) / webgl2(L1/2)  │
 │             / webgpu(L3) · render_graph deferred_pbr  │
-│             meshlet hiz visibility_buffer taa vrs vt  │
-│             lightmap ddgi restir neural_material      │
+│             meshlet hiz visibility_buffer taa taa_gpu │
+│             vrs vt lightmap ddgi restir neural_material│
 │             virtual_geometry frame_predict/interp     │
 │  infer/     tensor(NanoTensor) tfjs_backend inference │
 │             neural                                    │
 │  core/      math capability contracts memory job      │
-│             determinism profiler cvar json log engine │
+│             determinism profiler cvar json log hash   │
+│             engine                                    │
 └──────────────────────────────────────────────────────┘
 ```
 
@@ -37,6 +45,12 @@
 2. 编辑器视口渲染：`Scene3D → 图元几何 → Viewport3D(SoftwareDevice) → RGBA8 → canvas`。
 3. 游戏运行：`GameRuntime` 固定步长驱动 scripts + physics；渲染走 RHI 三级后端。
 4. 推理：`inference.js` 统一入口，`tfjs_backend` 存在时走 TF.js，否则降级 `NanoTensor`（红线 E）。
+5. **建模（v3）**：GUI 按钮 / 脚本 `ops.*` → **同一命令总线** `CommandBus` → half-edge `HMesh`
+   → `toRenderMesh()` 派生渲染缓存 → 视口 dirty 增量重建；`History` 命令级双轨撤销。
+6. **vdom diff（游戏版）**：数据 → `render(data)` 产 vnode 树 → `patch/updateChildren` diff
+   → host 适配器落地（Scene3D 对象树 / DOM / mock）。
+7. **导出（M-F）**：`Scene3D → collectExportItems → exportScene` → OBJ+MTL / glTF / GLB
+   （含坐标/单位变换层，仅文件 IO，不参与运行时）。
 
 ## 渲染后端策略
 

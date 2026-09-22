@@ -46,7 +46,8 @@ engine_tensorflow+js/
                 ai.js  animation.js
     platform/   vfs.js  asset_pipeline.js  ddc.js  prefab.js  hot_reload.js
                 cvar_console.js  scene.js  scene3d.js  hydrator.js  exporter.js
-                runtime.js  scripting.js  network.js  audio.js  resource.js
+                export_mesh.js  runtime.js  scripting.js  network.js  net_ws.js
+                audio.js  audio_web.js  resource.js
     infer/      tensor.js  tfjs_backend.js  inference.js  neural.js
     vdom/       vnode.js  patch.js  modules.js  gnode_host.js  dom_host.js  index.js
                 【vdom diff 游戏版：Vue2 patch 内核（平台无关）+ Scene3D/DOM/mock 三 host】
