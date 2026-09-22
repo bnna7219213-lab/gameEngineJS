@@ -1,0 +1,19 @@
+{
+  "name": "engine-tensorflow-js",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "description": "浏览器端自研游戏引擎：WebGPU/WebGL2 渲染 + TensorFlow.js 计算推理 + Web 编辑器（engine_refactored 的 JS 版全功能对等实现）",
+  "scripts": {
+    "test": "node tools/run_smoke.js",
+    "serve": "node serve.mjs",
+    "verify": "node tools/run_smoke.js"
+  },
+  "optionalDependencies": {
+    "@tensorflow/tfjs": "^4.22.0"
+  },
+  "engines": {
+    "node": ">=18"
+  },
+  "license": "Apache-2.0"
+}

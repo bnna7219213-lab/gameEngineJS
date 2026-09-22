@@ -1,0 +1,13 @@
+# engine_tensorflow+js OBJ (v3 M-F)
+# axis=YUP_M up=Y scale=1
+# 顶点/法线/UV 已按对象世界矩阵烘焙（engine: Y-up 米制）
+mtllib interop.mtl
+o tri
+v 0 1 0
+v 1 1 0
+v 0 2 0
+vn 0 0 1
+vn 0 0 1
+vn 0 0 1
+usemtl tri_mat
+f 1//1 2//2 3//3

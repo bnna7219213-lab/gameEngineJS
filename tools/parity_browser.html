@@ -1,0 +1,310 @@
+<!doctype html>
+<html lang="zh-CN"><head><meta charset="utf-8"><title>RHI Parity 验收 · WebGL2 vs Software</title>
+<style>body{background:#0d0e14;color:#d7d9e0;font:13px/1.5 monospace;margin:16px}#log div{white-space:pre-wrap;border-bottom:1px solid #1c1f2a;padding:4px 0}h2{color:#9aa0b0;font-size:14px}canvas{border:1px solid #2a2e3a;margin:4px}pre{color:#8a8d99}</style>
+</head><body>
+<h1>RHI Parity 验收（WebGL2 黄金参考 vs Software 黄金参考）</h1>
+<p>逐像素差异阈值：≤3（≈2/255 tolerance）。Diff 图：黑=一致，彩色=差异。</p>
+<div id="log"></div>
+<canvas id="gl" width="96" height="96" style="display:none"></canvas>
+<canvas id="sw" width="96" height="96" style="display:none"></canvas>
+<canvas id="diff" width="96" height="96"></canvas>
+<pre id="summary"></pre>
+<script type="module">
+import { WebGL2Device } from '../src/engine/render/rhi_webgl2.js';
+import { SoftwareDevice } from '../src/engine/render/rhi_software.js';
+import { vertexLayout } from '../src/engine/render/rhi.js';
+import { Mat4, Vec3 } from '../src/engine/core/math.js';
+import { SceneRenderer } from '../src/engine/render/scene_render.js';
+
+const W = 96, H = 96;
+const results = [];
+function log(msg, ok) {
+  const d = document.createElement('div');
+  d.textContent = (ok === undefined ? '· ' : (ok ? 'PASS ' : 'FAIL ')) + msg;
+  d.style.color = ok === false ? '#f66' : (ok ? '#6d6' : '#c9c');
+  document.getElementById('log').appendChild(d);
+}
+function diffImg(a, b) {
+  const out = new Uint8ClampedArray(W * H * 4);
+  let maxd = 0;
+  for (let i = 0; i < W * H; i++) {
+    const o = i * 4;
+    const d = Math.max(Math.abs(a[o] - b[o]), Math.abs(a[o + 1] - b[o + 1]), Math.abs(a[o + 2] - b[o + 2]));
+    if (d > maxd) maxd = d;
+    out[o] = d; out[o + 1] = d; out[o + 2] = d; out[o + 3] = 255;
+  }
+  return { maxd, out };
+}
+
+async function render(dev, desc, { layout, verts, indices, mvp, clear = [0, 0, 0, 255], cull = 'none', depth = false, targets = 1, bindTex = null } = {}) {
+  const vb = dev.createBuffer({ data: new Float32Array(verts) });
+  const ib = dev.createBuffer({ data: new Uint32Array(indices) });
+  const sh = dev.createShader(desc);
+  const pipe = dev.createPipeline({ shader: sh, vertexLayout: layout, depth, cull, topology: 'triangles', targets });
+  dev.beginFrame();
+  dev.beginPass({ clearColor: clear });
+  dev.setPipeline(pipe);
+  dev.setVertexBuffer(vb);
+  dev.setIndexBuffer(ib, 'u32');
+  if (mvp) dev.setConstants({ mvp });
+  if (bindTex) dev.bindTexture(0, bindTex);
+  dev.drawIndexed(indices.length);
+  dev.endPass();
+  dev.endFrame();
+  return dev.snapshot();
+}
+
+function showDiff(diff) {
+  const c = document.getElementById('diff');
+  if (!c._ctx) c._ctx = c.getContext('2d');
+  c._ctx.putImageData(new ImageData(new Uint8ClampedArray(diff), W, H), 0, 0);
+}
+
+async function run() {
+  const glDev = new WebGL2Device();
+  const glOk = await glDev.init({ canvas: document.getElementById('gl'), width: W, height: H });
+  if (!glOk) { log('WebGL2 不可用，无法运行 parity（请在支持 WebGL2 的浏览器打开）', false); return; }
+  const swDev = new SoftwareDevice();
+  await swDev.init({ width: W, height: H });
+
+  // ---- 用例 1：顶点布局(pos+color) + Uniform(MVP) ----
+  {
+    const layout = vertexLayout([{ name: 'pos', type: 'f32x3' }, { name: 'color', type: 'f32x3' }]);
+    const P = [0, 0.6, -1, -0.6, -0.5, -1, 0.6, -0.5, -1];
+    const C = [1, 0.2, 0.2, 0.2, 1, 0.2, 0.2, 0.2, 1];
+    const verts = []; for (let i = 0; i < 3; i++) verts.push(P[i * 3], P[i * 3 + 1], P[i * 3 + 2], C[i * 3], C[i * 3 + 1], C[i * 3 + 2]);
+    const mvp = Mat4.perspective(Math.PI / 3, 1, 0.1, 100).mul(Mat4.lookAt(Vec3.of(0, 0, 4), Vec3.of(0, 0, 0), Vec3.of(0, 1, 0)));
+    const desc = {
+      glsl: {
+        vs: `#version 300 es
+layout(location=0) in vec3 aPos; layout(location=1) in vec3 aColor;
+uniform mat4 uMVP; out vec3 vColor;
+void main(){ vColor=aColor; gl_Position=uMVP*vec4(aPos,1.0); }`,
+        fs: `#version 300 es
+precision mediump float; in vec3 vColor; out vec4 o;
+void main(){ o=vec4(vColor,1.0); }`
+      },
+      js: {
+        vs: (a, u) => ({ pos: u.mvp.transformH([a.pos[0], a.pos[1], a.pos[2], 1]), vary: { color: a.color } }),
+        fs: (v) => [v.color[0] * 255, v.color[1] * 255, v.color[2] * 255, 255]
+      }
+    };
+    const g = await render(glDev, desc, { layout, verts, indices: [0, 1, 2], mvp });
+    const s = await render(swDev, desc, { layout, verts, indices: [0, 1, 2], mvp });
+    const { maxd, out } = diffImg(g.rgba, s.rgba);
+    results.push(maxd <= 3); showDiff(out);
+    log(`用例1 顶点布局+Uniform：maxDiff=${maxd}（阈值3）`, maxd <= 3);
+  }
+
+  // ---- 用例 2：纹理采样 ----
+  {
+    const S = 4;
+    const texData = new Uint8Array(S * S * 4);
+    for (let i = 0; i < S * S; i++) { texData[i * 4] = (i * 37) & 255; texData[i * 4 + 1] = (i * 53) & 255; texData[i * 4 + 2] = (i * 91) & 255; texData[i * 4 + 3] = 255; }
+    const glTex = glDev.createTexture({ width: S, height: S, data: texData, minFilter: 'nearest', magFilter: 'nearest', wrapS: 'clamp', wrapT: 'clamp' });
+    const swTex = swDev.createTexture({ width: S, height: S, data: texData });
+    const layout = vertexLayout([{ name: 'pos', type: 'f32x3' }, { name: 'uv', type: 'f32x2' }]);
+    // 全屏四边形（NDC 直接输出，无透视）
+    const verts = [-1, -1, 0, 0, 0, 1, -1, 0, 1, 0, 1, 1, 0, 1, 1, -1, 1, 0, 0, 1];
+    const desc = {
+      glsl: {
+        vs: `#version 300 es
+layout(location=0) in vec3 aPos; layout(location=1) in vec2 aUV;
+out vec2 vUV; void main(){ vUV=aUV; gl_Position=vec4(aPos,1.0); }`,
+        fs: `#version 300 es
+precision mediump float; in vec2 vUV; uniform sampler2D uTex0; out vec4 o;
+void main(){ o=texture(uTex0, vUV); }`
+      },
+      js: {
+        vs: (a) => ({ pos: [a.pos[0], a.pos[1], a.pos[2], 1], vary: { uv: a.uv } }),
+        fs: (v, u) => { const t = u.tex0; const x = Math.min(t.w - 1, Math.max(0, (v.uv[0] * t.w) | 0)); const y = Math.min(t.h - 1, Math.max(0, (v.uv[1] * t.h) | 0)); const i = (y * t.w + x) * 4; return [t.data[i], t.data[i + 1], t.data[i + 2], 255]; }
+      }
+    };
+    const g = await render(glDev, desc, { layout, verts, indices: [0, 1, 2, 0, 2, 3], bindTex: glTex });
+    const s = await render(swDev, desc, { layout, verts, indices: [0, 1, 2, 0, 2, 3], bindTex: swTex });
+    const { maxd, out } = diffImg(g.rgba, s.rgba);
+    results.push(maxd <= 3); showDiff(out);
+    log(`用例2 纹理采样：maxDiff=${maxd}（阈值3）`, maxd <= 3);
+  }
+
+  // ---- 用例 3：背面剔除（CW 三角形在 cull=back 下被剔除，两者均为清屏色）----
+  {
+    const layout = vertexLayout([{ name: 'pos', type: 'f32x3' }]);
+    const verts = [0, 0.6, 0, 0.6, -0.5, 0, -0.6, -0.5, 0]; // 顺时针 → 背面
+    const desc = {
+      glsl: { vs: `#version 300 es\nlayout(location=0) in vec3 aPos; void main(){ gl_Position=vec4(aPos,1.0); }`,
+        fs: `#version 300 es\nprecision mediump float; out vec4 o; void main(){ o=vec4(1,0,0,1); }` },
+      js: { vs: (a) => ({ pos: [a.pos[0], a.pos[1], a.pos[2], 1], vary: {} }), fs: () => [255, 0, 0, 255] }
+    };
+    const g = await render(glDev, desc, { layout, verts, indices: [0, 1, 2], cull: 'back', clear: [10, 12, 20, 255] });
+    const s = await render(swDev, desc, { layout, verts, indices: [0, 1, 2], cull: 'back', clear: [10, 12, 20, 255] });
+    const { maxd, out } = diffImg(g.rgba, s.rgba);
+    results.push(maxd <= 3); showDiff(out);
+    log(`用例3 背面剔除：maxDiff=${maxd}（阈值3，应为0=三角被剔除）`, maxd <= 3 && maxd === 0);
+  }
+
+  // ---- 用例 4：MRT（WebGL2 功能验证，Software 不支持故非 parity）----
+  {
+    const t0 = glDev.createTexture({ width: W, height: H, minFilter: 'nearest', magFilter: 'nearest' });
+    const t1 = glDev.createTexture({ width: W, height: H, minFilter: 'nearest', magFilter: 'nearest' });
+    const rt = glDev.createRenderTarget({ textures: [t0, t1] });
+    const layout = vertexLayout([{ name: 'pos', type: 'f32x3' }]);
+    const verts = [-0.8, -0.8, 0, 0.8, -0.8, 0, 0, 0.8, 0];
+    const sh = glDev.createShader({
+      glsl: { vs: `#version 300 es\nlayout(location=0) in vec3 aPos; void main(){ gl_Position=vec4(aPos,1.0); }`,
+        fs: `#version 300 es\nprecision mediump float; layout(location=0) out vec4 o0; layout(location=1) out vec4 o1;
+void main(){ o0=vec4(1.0,0.0,0.0,1.0); o1=vec4(0.0,1.0,0.0,1.0); }` }
+    });
+    const pipe = glDev.createPipeline({ shader: sh, vertexLayout: layout, targets: 2 });
+    glDev.beginFrame(); glDev.beginPass({ targets: [rt], clearColor: [0, 0, 0, 255] });
+    glDev.setPipeline(pipe); glDev.setVertexBuffer(glDev.createBuffer({ data: new Float32Array(verts) }));
+    glDev.setIndexBuffer(glDev.createBuffer({ data: new Uint32Array([0, 1, 2]) }), 'u32');
+    glDev.drawIndexed(3); glDev.endPass(); glDev.endFrame();
+    const r0 = glDev.readTexture(t0), r1 = glDev.readTexture(t1);
+    const red = r0.rgba[0], green = r1.rgba[1];
+    const okMRT = red > 200 && green > 200;
+    results.push(okMRT);
+    log(`用例4 MRT：attachment0 偏红(R=${red})、attachment1 偏绿(G=${green})`, okMRT);
+  }
+
+  // ---- 辅助：统一场景渲染（两后端共用 SceneRenderer 提交路径）----
+  function makeQuad() {
+    return { positions: [-0.5, -0.5, 0, 0.5, -0.5, 0, 0.5, 0.5, 0, -0.5, 0.5, 0],
+      normals: [0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1], uvs: [0, 0, 1, 0, 1, 1, 0, 1], indices: new Uint32Array([0, 1, 2, 0, 2, 3]) };
+  }
+  const stdCam = { eye: [0, 0, 3], target: [0, 0, 0], up: [0, 1, 0], fovY: Math.PI / 3, near: 0.1, far: 100 };
+  function renderScene(dev, scene, cam, opts = {}) {
+    const sr = new SceneRenderer(dev, { width: W, height: H });
+    sr.setCamera(cam || stdCam); sr.setScene(scene);
+    if (opts.post) Object.assign(sr.postParams, opts.post);
+    if (opts.occlusion) sr.setOcclusion(true);
+    if (opts.taa) sr.setTAA(true, opts.taaOpts || { alpha: 0.1, scale: 1 });
+    let out; const frames = opts.frames || 1;
+    for (let i = 0; i < frames; i++) out = sr.render();
+    return out;
+  }
+
+  // ---- 用例 5：实例化绘制 parity（4 实例矩阵 → 4 彩色四边形）----
+  {
+    const quad = makeQuad();
+    const scene = { meshes: [quad], instances: [{ mesh: 0, matrices: [
+      Mat4.translation(-0.5, 0.5, 0), Mat4.translation(0.5, 0.5, 0), Mat4.translation(-0.5, -0.5, 0), Mat4.translation(0.5, -0.5, 0)
+    ], colors: [[0.8, 0.2, 0.2], [0.2, 0.85, 0.2], [0.2, 0.2, 0.9], [0.95, 0.9, 0.2]] }] };
+    const g = renderScene(glDev, scene, stdCam);
+    const s = renderScene(swDev, scene, stdCam);
+    const { maxd, out } = diffImg(g.rgba, s.rgba);
+    results.push(maxd <= 3); showDiff(out);
+    log(`用例5 实例化绘制：maxDiff=${maxd}（阈值3）`, maxd <= 3);
+  }
+
+  // ---- 用例 6：视锥剔除 parity（屏外网格被剔除，两后端可见集一致）----
+  {
+    const visM = Object.assign(makeQuad(), { transform: Mat4.translation(0, 0, 0), color: [0.9, 0.9, 0.2] });
+    const offM = Object.assign(makeQuad(), { transform: Mat4.translation(10, 0, 0), color: [0.2, 0.9, 0.2] });
+    const scene = { meshes: [visM, offM] };
+    const srG = new SceneRenderer(glDev, { width: W, height: H }); srG.setCamera(stdCam); srG.setScene(scene);
+    const oG = srG.render(); const visG = srG._lastVisible.length;
+    const srS = new SceneRenderer(swDev, { width: W, height: H }); srS.setCamera(stdCam); srS.setScene(scene);
+    const oS = srS.render(); const visS = srS._lastVisible.length;
+    const { maxd, out } = diffImg(oG.rgba, oS.rgba);
+    results.push(maxd <= 3 && visG === 1 && visS === 1);
+    log(`用例6 视锥剔除：maxDiff=${maxd}，可见 ${visG}/${visS}（应剔除数=1 共2）`, maxd <= 3 && visG === 1 && visS === 1);
+  }
+
+  // ---- 用例 7：后处理 parity（HDR→ACES+bloom，两后端逐像素一致）----
+  {
+    const bright = Object.assign(makeQuad(), { transform: Mat4.translation(0, 0, 0), color: [3.0, 2.5, 0.5] });
+    const scene = { meshes: [bright] };
+    const post = { threshold: 1.0, knee: 0.5, exposure: 1.0, bloomIntensity: 0.8, radius: 4 };
+    const g = renderScene(glDev, scene, stdCam, { post });
+    const s = renderScene(swDev, scene, stdCam, { post });
+    const { maxd, out } = diffImg(g.rgba, s.rgba);
+    results.push(maxd <= 4); showDiff(out);
+    log(`用例7 后处理(HDR→ACES+bloom)：maxDiff=${maxd}（阈值4）`, maxd <= 4);
+  }
+
+  // ---- 用例 8：MSAA（WebGL2 能力验证；Software 不支持→优雅降级，仅 WebGL2 验收）----
+  {
+    async function renderMSAA(dev, verts, indices, samples) {
+      const vb = dev.createBuffer({ data: new Float32Array(verts) });
+      const ib = dev.createBuffer({ data: new Uint32Array(indices) });
+      const sh = dev.createShader({ glsl: {
+        vs: `#version 300 es\nlayout(location=0) in vec3 aPos; void main(){ gl_Position=vec4(aPos,1.0); }`,
+        fs: `#version 300 es\nprecision mediump float; out vec4 o; void main(){ o=vec4(0.9,0.2,0.2,1.0); }` } });
+      const pipe = dev.createPipeline({ shader: sh, vertexLayout: vertexLayout([{ name: 'pos', type: 'f32x3' }]), depth: false });
+      const tex = dev.createTexture({ width: W, height: H, minFilter: 'nearest', magFilter: 'nearest' });
+      const rt = dev.createRenderTarget({ textures: [tex], samples });
+      dev.beginFrame(); dev.beginPass({ targets: [rt], clearColor: [10, 12, 20, 255] });
+      dev.setPipeline(pipe); dev.setVertexBuffer(vb); dev.setIndexBuffer(ib, 'u32'); dev.drawIndexed(indices.length); dev.endPass();
+      if (samples > 1) dev.resolveRenderTarget(rt.id);
+      dev.endFrame();
+      return dev.readTexture(tex).rgba;
+    }
+    // 左半红矩形 + 锐利竖直边（x=0 → 屏幕中线），AA 应平滑该边
+    const triV = [-1, -1, 0, -1, 1, 0, 0, 1, 0, 0, -1, 0], triI = [0, 1, 2, 0, 2, 3];
+    const r1 = await renderMSAA(glDev, triV, triI, 1);
+    const r4 = await renderMSAA(glDev, triV, triI, 4);
+    let c1 = 0, c4 = 0;
+    const between = (r) => r > 30 && r < 200;
+    for (let i = 0; i < r1.length; i += 4) { if (between(r1[i])) c1++; if (between(r4[i])) c4++; }
+    const ok = c4 > c1 && c4 > 0;
+    results.push(ok);
+    log(`用例8 MSAA：samples=1 中间调像素=${c1}，samples=4=${c4}（MSAA 应更多平滑像素）`, ok);
+  }
+
+  // ---- 用例 9：Hi-Z 遮挡剔除 parity（墙遮挡其后小球，两后端可见集与像素一致）----
+  {
+    const wall = { positions: [-2, -2, -1, 2, -2, -1, 2, 2, -1, -2, 2, -1],
+      normals: [0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1], uvs: [0, 0, 1, 0, 1, 1, 0, 1],
+      indices: new Uint32Array([0, 1, 2, 0, 2, 3]), occluder: true };
+    const hidden = { positions: [-0.25, -0.25, -3, 0.25, -0.25, -3, 0.25, 0.25, -3, -0.25, 0.25, -3],
+      normals: [0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1], uvs: [0, 0, 1, 0, 1, 1, 0, 1],
+      indices: new Uint32Array([0, 1, 2, 0, 2, 3]), color: [0.2, 0.9, 0.9] };
+    const sc = { meshes: [wall, hidden] };
+    const g = renderScene(glDev, sc, stdCam, { occlusion: true });
+    const s = renderScene(swDev, sc, stdCam, { occlusion: true });
+    const { maxd, out } = diffImg(g.rgba, s.rgba);
+    results.push(maxd <= 3); showDiff(out);
+    log(`用例9 Hi-Z 遮挡剔除 parity：maxDiff=${maxd}（阈值3，两后端应一致剔除隐藏球且像素一致）`, maxd <= 3);
+  }
+
+  // ---- 用例 10：TAA parity（逐帧抖动+历史混合，两后端第2帧应一致）----
+  {
+    const bright = Object.assign(makeQuad(), { transform: Mat4.translation(0, 0, 0), color: [3.0, 2.5, 0.5] });
+    const sc = { meshes: [bright] };
+    const post = { threshold: 1.0, knee: 0.5, exposure: 1.0, bloomIntensity: 0.8, radius: 4 };
+    const g = renderScene(glDev, sc, stdCam, { post, taa: true, frames: 2 });
+    const s = renderScene(swDev, sc, stdCam, { post, taa: true, frames: 2 });
+    const { maxd, out } = diffImg(g.rgba, s.rgba);
+    results.push(maxd <= 4); showDiff(out);
+    log(`用例10 TAA parity：maxDiff=${maxd}（阈值4，两后端历史混合应一致）`, maxd <= 4);
+  }
+
+  // ---- 用例 11：编辑器视口 GPU 路径 parity（Viewport3D 走 WebGL2 vs Software，P5#1 验收）----
+  {
+    const { Viewport3D } = await import('../src/engine/render/viewport3d.js');
+    const quad = makeQuad();
+    async function renderViewport(dev, lit) {
+      const vp = new Viewport3D(dev, { width: W, height: H });
+      vp.setCamera(stdCam);
+      if (lit) vp.setLights([{ type: 0, color: [1, 1, 1], intensity: 1.2, direction: [0.4, 0.8, 0.5], shadow: null }]);
+      vp.addMesh({ positions: quad.positions, normals: quad.normals, indices: quad.indices, albedo: [200, 90, 60], rough: 0.6, metal: 0 });
+      return vp.renderToRGBA8();
+    }
+    const gLit = await renderViewport(glDev, true), sLit = await renderViewport(null, true);
+    const dLit = diffImg(gLit, sLit);
+    results.push(dLit.maxd <= 4); showDiff(dLit.out);
+    log(`用例11a 编辑器视口 lit(PBR) parity：maxDiff=${dLit.maxd}（阈值4）`, dLit.maxd <= 4);
+    const gUn = await renderViewport(glDev, false), sUn = await renderViewport(null, false);
+    const dUn = diffImg(gUn, sUn);
+    results.push(dUn.maxd <= 4); showDiff(dUn.out);
+    log(`用例11b 编辑器视口 unlit parity：maxDiff=${dUn.maxd}（阈值4，验证新增 GLSL 与软渲染一致）`, dUn.maxd <= 4);
+  }
+
+  glDev.destroy(); swDev.destroy();
+  const pass = results.filter(Boolean).length, fail = results.length - pass;
+  document.getElementById('summary').textContent = `总览：PASS ${pass} / ${results.length}  ${fail === 0 ? 'ALL_DONE' : 'HAS_FAILURES'}`;
+}
+run();
+</script>
+</body></html>

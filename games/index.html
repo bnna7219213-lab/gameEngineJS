@@ -1,0 +1,31 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8" />
+  <title>games · engine_tensorflow+js</title>
+  <style>
+    body { background:#1e1f24; color:#d7d9e0; font:14px/1.6 "Segoe UI","Microsoft YaHei",sans-serif; margin:0; padding:40px; }
+    h1 { color:#7aa5ff; }
+    .grid { display:grid; grid-template-columns:repeat(auto-fill,minmax(260px,1fr)); gap:16px; max-width:1000px; }
+    a.card { display:block; background:#26272e; border:1px solid #3a3c46; border-radius:8px; padding:18px; color:inherit; text-decoration:none; }
+    a.card:hover { border-color:#4f8cff; }
+    .card b { font-size:16px; }
+    .card p { color:#8a8d99; margin:8px 0 0; }
+    .card .eng { color:#4fbf67; font-size:12px; margin-top:10px; }
+  </style>
+</head>
+<body>
+  <h1>engine_tensorflow+js · 示例游戏</h1>
+  <div class="grid" id="grid"></div>
+  <script type="module">
+    import { games } from './index.js';
+    const g = document.getElementById('grid');
+    for (const x of games) {
+      const a = document.createElement('a');
+      a.className = 'card'; a.href = x.path;
+      a.innerHTML = `<b>${x.title}</b><p>${x.desc}</p><div class="eng">引擎模块: ${x.engine.join(' · ')}</div>`;
+      g.appendChild(a);
+    }
+  </script>
+</body>
+</html>

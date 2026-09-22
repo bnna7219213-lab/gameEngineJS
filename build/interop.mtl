@@ -1,0 +1,9 @@
+# engine_tensorflow+js MTL (v3 M-F)
+newmtl tri_mat
+Kd 0.8984323481889295 0.595850953905423 0.432587295114217
+Ke 0 0 0
+Ka 0 0 0
+Ns 10
+d 1
+Pr 0.4
+Pm 0
